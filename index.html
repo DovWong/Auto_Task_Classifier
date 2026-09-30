@@ -76,6 +76,8 @@ a{color:var(--accent)}
 .kind-hint{font-size:13px;color:var(--ink-2)}
 .tool-group{display:flex;gap:6px;margin-left:auto}
 .tool{font-size:14px;padding:6px 12px;border-radius:8px;border:1px solid var(--line);background:var(--surface-2);color:var(--ink);cursor:pointer;user-select:none}
+.paste-banner{margin-bottom:12px}
+.paste-banner .btn-primary{margin-top:0}
 .attach{display:flex;align-items:center;gap:10px;margin:8px 0 4px;padding:8px;border-radius:10px;background:var(--surface-2)}
 .attach img{width:64px;height:64px;object-fit:cover;border-radius:8px}
 .attach .name{flex:1;min-width:0;font-size:14px;word-break:break-all}
@@ -245,6 +247,9 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 
   <main class="app">
     <section class="pane pane-input active" id="paneInput">
+      <div id="pasteBanner" class="paste-banner" hidden>
+        <button type="button" class="btn-primary" data-act="paste">撳這裏貼上剛才分享的圖片</button>
+      </div>
       <div class="inbox" id="inbox">
         <textarea id="mainInput" rows="4" placeholder="貼上連結、文字或圖片"></textarea>
         <div id="attachBox"></div>
@@ -509,6 +514,12 @@ async function cleanupDone(){
 }
 function readParams(){
   const p = new URLSearchParams(location.search);
+  if (p.has('paste')) {
+    $('#pasteBanner').hidden = false;
+    setTab('input');
+    history.replaceState(null, '', location.pathname);
+    return;
+  }
   const u = p.get('url') || '', t = p.get('text') || '';
   const val = t && u && t.includes(u) ? t : [t, u].filter(Boolean).join('\n');
   if (val) {
@@ -571,6 +582,7 @@ async function pasteFromClipboard(){
   } catch { toast('讀取不到剪貼簿，請長按輸入框貼上', true); }
 }
 function setAttachment(file){
+  $('#pasteBanner').hidden = true;
   if (draft.previewURL) URL.revokeObjectURL(draft.previewURL);
   draft.file = file;
   draft.previewURL = file.type.startsWith('image/') ? URL.createObjectURL(file) : '';
@@ -627,10 +639,18 @@ async function fetchTitle(url){
   const my = ++titleReq;
   draft.titleState = 'loading'; updateTitleField();
   let title = '';
+  const yid = siteType(url) === 'youtube' ? ytId(url) : null;
+  const target = yid ? `https://www.youtube.com/watch?v=${yid}` : url;
   try {
-    const { data, error } = await sb.functions.invoke('fetch-title', { body: { url } });
+    const { data, error } = await sb.functions.invoke('fetch-title', { body: { url: target } });
     if (!error && data && data.title) title = data.title;
   } catch {}
+  if (!title && yid) {
+    try {
+      const r = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(target)}`);
+      const j = await r.json(); if (j && j.title) title = j.title;
+    } catch {}
+  }
   if (my !== titleReq || draft.url !== url) return;
   draft.titleState = title ? 'done' : 'failed';
   if (!draft.titleTouched) draft.title = title;
