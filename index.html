@@ -226,6 +226,15 @@ input[type=range]{width:100%;accent-color:var(--accent)}
   </form>
 </div>
 
+<div id="errorScreen" class="gate" hidden>
+  <form onsubmit="return false">
+    <h1>啟動失敗</h1>
+    <p>錯誤內容：</p>
+    <div class="err" id="errorMsg" style="word-break:break-all"></div>
+    <button class="btn-primary" type="button" onclick="location.reload()">重新載入</button>
+  </form>
+</div>
+
 <div id="mainApp" hidden>
   <header class="top">
     <h1 class="brand">收集箱</h1>
@@ -278,8 +287,8 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 /* ============ 設定 ============
    直接在這裏填入，就不用每部裝置各自輸入一次。
    anon key 是公開用的，資料靠 Supabase 的權限規則保護。 */
-const SUPABASE_URL = 'sb_publishable_LKT5CR-u3eWAkRQ-wmp_0g_yEmwFmf6';
-const SUPABASE_ANON_KEY = 'https://evbzbvvyqaxakbeslqgn.supabase.co';
+const SUPABASE_URL = 'https://evbzbvvyqaxakbeslqgn.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_LKT5CR-u3eWAkRQ-wmp_0g_yEmwFmf6';
 
 const CATS = [
   {id:'watch',    name:'稍後觀看', c:'#D1495B'},
@@ -423,11 +432,29 @@ function showScreen(name){
   $('#configScreen').hidden = name !== 'config';
   $('#loginScreen').hidden = name !== 'login';
   $('#mainApp').hidden = name !== 'main';
+  $('#errorScreen').hidden = name !== 'error';
+}
+function loadScript(src){
+  return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('無法載入 ' + src)); document.head.appendChild(s); });
+}
+async function ensureSupabaseLib(){
+  if (window.supabase?.createClient) return;
+  const fallbacks = [
+    'https://unpkg.com/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js',
+    'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js',
+  ];
+  for (const src of fallbacks) { try { await loadScript(src); if (window.supabase?.createClient) return; } catch {} }
+  throw new Error('連線元件載入失敗。可能是瀏覽器的廣告攔截擴充功能，或公司網絡封鎖了 cdn.jsdelivr.net 和 unpkg.com。');
 }
 async function boot(){
-  const url = SUPABASE_URL || localStorage.getItem('sb_url');
-  const key = SUPABASE_ANON_KEY || localStorage.getItem('sb_key');
+  const url = (SUPABASE_URL || localStorage.getItem('sb_url') || '').trim();
+  const key = (SUPABASE_ANON_KEY || localStorage.getItem('sb_key') || '').trim();
   if (!url || !key) { showScreen('config'); return; }
+  try { new URL(url); } catch {
+    localStorage.removeItem('sb_url'); localStorage.removeItem('sb_key');
+    throw new Error('Supabase 網址格式不正確：「' + url + '」。應該類似 https://xxxx.supabase.co');
+  }
+  await ensureSupabaseLib();
   sb = window.supabase.createClient(url, key, { auth: { persistSession: true, autoRefreshToken: true } });
   sb.auth.onAuthStateChange(ev => { if (ev === 'SIGNED_OUT') location.reload(); });
   const { data: { session } } = await sb.auth.getSession();
@@ -1076,7 +1103,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { if (!lb.hidden) { lb.hidden = true; return; } closeSheet(); }
 });
 
-boot().catch(err => { console.error(err); toast('啟動失敗：' + err.message, true); });
+boot().catch(err => { console.error(err); $('#errorMsg').textContent = err.message || String(err); showScreen('error'); });
 </script>
 </body>
 </html>
