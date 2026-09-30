@@ -149,6 +149,9 @@ a.i-title:hover{color:var(--accent)}
 .i-essay-title{font-family:var(--display);font-size:19px;font-weight:700;margin-bottom:2px}
 .i-url{font-size:13px;color:var(--ink-2);word-break:break-all;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
 .i-text{white-space:pre-wrap;word-break:break-word}
+.i-text a,.i-note a,.dupe-body a{word-break:break-all}
+a.i-url{text-decoration:none}
+a.i-url:hover{color:var(--accent);text-decoration:underline}
 .i-text.essay{font-family:var(--display);font-size:17px;line-height:1.75}
 .clamp{display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden}
 .expand{border:0;background:transparent;color:var(--accent);font-size:13px;padding:2px 0}
@@ -275,8 +278,8 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 /* ============ 設定 ============
    直接在這裏填入，就不用每部裝置各自輸入一次。
    anon key 是公開用的，資料靠 Supabase 的權限規則保護。 */
-const SUPABASE_URL = 'https://evbzbvvyqaxakbeslqgn.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_LKT5CR-u3eWAkRQ-wmp_0g_yEmwFmf6';
+const SUPABASE_URL = 'sb_publishable_LKT5CR-u3eWAkRQ-wmp_0g_yEmwFmf6';
+const SUPABASE_ANON_KEY = 'https://evbzbvvyqaxakbeslqgn.supabase.co';
 
 const CATS = [
   {id:'watch',    name:'稍後觀看', c:'#D1495B'},
@@ -329,6 +332,10 @@ function toast(msg, err) {
 
 /* ============ link helpers ============ */
 const URL_RE = /https?:\/\/[^\s<>"'，。、！？）」』】]+/i;
+const linkify = s => esc(s).replace(new RegExp(URL_RE.source, 'gi'), u => {
+  const clean = u.replace(/[.,;:!?]+$/, '');
+  return `<a href="${clean}" target="_blank" rel="noopener">${clean}</a>${u.slice(clean.length)}`;
+});
 const DROP_PARAMS = /^(utm_.*|fbclid|gclid|igshid|igsh|mibextid|si|ref|ref_src|ref_url|__tn__|__cft__.*|rdid|share_url|feature|_rdr|sfnsn|wtsid)$/i;
 const hostOf = u => u.hostname.toLowerCase().replace(/^(www|m|mobile|web|mbasic)\./, '');
 function domainOf(url){ try { return hostOf(new URL(url)); } catch { return ''; } }
@@ -685,7 +692,7 @@ function dupeRow(it, s){
   const detail = it.kind === 'link' ? (it.content || '') + (it.note ? '\n' + it.note : '') : (it.content || it.file_name || '') + (it.note ? '\n' + it.note : '');
   return `<details class="dupe-row"><summary><span class="dupe-pct">${s != null ? Math.round(s*100) + '%' : ''}</span>
     <span class="dupe-title">${esc(summaryOf(it))}</span><span class="dupe-date">${it.done_at ? '已完成 ' : ''}${fmtDate(it.created_at)}</span></summary>
-    <div class="dupe-body">${esc(detail)}</div></details>`;
+    <div class="dupe-body">${linkify(detail)}</div></details>`;
 }
 function runDupes(){
   const box = $('#dupeBox'); if (!box) return;
@@ -835,7 +842,7 @@ function dueBadge(due){
 }
 function clampBlock(text, cls = ''){
   const long = text.length > 180 || (text.match(/\n/g) || []).length > 5;
-  return `<div class="i-text ${cls} ${long ? 'clamp' : ''}">${esc(text)}</div>${long ? '<button type="button" class="expand" data-act="expand">展開</button>' : ''}`;
+  return `<div class="i-text ${cls} ${long ? 'clamp' : ''}">${linkify(text)}</div>${long ? '<button type="button" class="expand" data-act="expand">展開</button>' : ''}`;
 }
 function itemHTML(it){
   const done = !!it.done_at;
@@ -851,7 +858,7 @@ function itemHTML(it){
   if (it.kind === 'link') {
     const yid = siteType(it.content) === 'youtube' ? ytId(it.content) : null;
     body += `<div class="link-row"><div class="link-main"><a class="i-title" href="${esc(it.content)}" target="_blank" rel="noopener">${esc(it.title || it.content)}</a>
-      <div class="i-url">${esc(it.content)}</div></div>
+      <a class="i-url" href="${esc(it.content)}" target="_blank" rel="noopener">${esc(it.content)}</a></div>
       ${yid ? `<a href="${esc(it.content)}" target="_blank" rel="noopener"><img class="yt-thumb" loading="lazy" src="https://i.ytimg.com/vi/${esc(yid)}/mqdefault.jpg" alt=""></a>` : ''}</div>`;
     badges.push(`<span class="badge">${esc(linkLabel(it.content))}</span>`);
   } else if (it.kind === 'text') {
@@ -879,7 +886,7 @@ function itemHTML(it){
   }
   badges.push(`<span>${it.category === 'essay' && it.entry_date ? fmtDay(it.entry_date) : fmtDate(it.created_at)}</span>`);
 
-  const note = it.note ? `<div class="i-note">${esc(it.note)}</div>` : '';
+  const note = it.note ? `<div class="i-note">${linkify(it.note)}</div>` : '';
   let countdown = '';
   if (done) {
     const left = Math.ceil((new Date(it.done_at).getTime() + DONE_DAYS * 864e5 - Date.now()) / 864e5);
