@@ -250,6 +250,9 @@ input[type=range]{width:100%;accent-color:var(--accent)}
       <div id="pasteBanner" class="paste-banner" hidden>
         <button type="button" class="btn-primary" data-act="paste">撳這裏貼上剛才分享的圖片</button>
       </div>
+      <div id="fileBanner" class="paste-banner" hidden>
+        <button type="button" class="btn-primary" data-act="pickFileBanner">撳這裏選擇剛才分享的檔案</button>
+      </div>
       <div class="inbox" id="inbox">
         <textarea id="mainInput" rows="4" placeholder="貼上連結、文字或圖片"></textarea>
         <div id="attachBox"></div>
@@ -490,6 +493,7 @@ async function startApp(){
   await loadItems();
   renderView();
   cleanupDone();
+  cleanupTmp();
   sb.channel('items-sync')
     .on('postgres_changes', { event:'*', schema:'public', table:'items' }, () => {
       clearTimeout(rtTimer); rtTimer = setTimeout(async () => { await loadItems(); renderView(); }, 500);
@@ -503,6 +507,13 @@ async function loadItems(){
   if (error) { toast('讀取資料失敗：' + error.message, true); return; }
   items = data || [];
 }
+// 分享上載後超過一日仍未儲存的檔案，自動清走
+async function cleanupTmp(){
+  const { data } = await sb.storage.from(BUCKET).list(`${user.id}/tmp`, { limit: 100 });
+  const old = (data || []).filter(o => o.name && o.created_at && Date.now() - new Date(o.created_at).getTime() > 864e5)
+    .map(o => `${user.id}/tmp/${o.name}`);
+  if (old.length) await sb.storage.from(BUCKET).remove(old);
+}
 async function cleanupDone(){
   const cutoff = Date.now() - DONE_DAYS * 864e5;
   const old = items.filter(i => i.done_at && new Date(i.done_at).getTime() < cutoff);
@@ -514,8 +525,31 @@ async function cleanupDone(){
 }
 function readParams(){
   const p = new URLSearchParams(location.search);
+  if (p.has('uploadError')) {
+    history.replaceState(null, '', location.pathname);
+    setTab('input');
+    setTimeout(() => toast('上載失敗：' + p.get('uploadError'), true), 300);
+    return;
+  }
+  if (p.has('upload')) {
+    const path = p.get('upload');
+    history.replaceState(null, '', location.pathname);
+    setTab('input');
+    if (path.startsWith(user.id + '/tmp/')) {
+      setAttachment({ remote: true, path, name: p.get('name') || 'upload', type: p.get('type') || '', size: +(p.get('size') || 0) });
+    }
+    return;
+  }
+  if (p.has('file')) {
+    $('#fileBanner').hidden = false;
+    setTab('input');
+    history.replaceState(null, '', location.pathname);
+    return;
+  }
   if (p.has('paste')) {
-    $('#pasteBanner').hidden = false;
+    const pb = $('#pasteBanner'), btn = pb.querySelector('button');
+    btn.textContent = '撳這裏貼上剛才分享的圖片'; btn.disabled = false;
+    pb.hidden = false;
     setTab('input');
     history.replaceState(null, '', location.pathname);
     return;
@@ -579,19 +613,44 @@ async function pasteFromClipboard(){
     } else {
       insertText(await navigator.clipboard.readText());
     }
-  } catch { toast('讀取不到剪貼簿，請長按輸入框貼上', true); }
+  } catch { pasteFallback(); return; }
+  pasteFallback();
+}
+function pasteFallback(){
+  if (draft.file || $('#mainInput').value.trim()) return;
+  const b = $('#pasteBanner');
+  b.hidden = false;
+  b.querySelector('button').textContent = '請長按下面的輸入框，揀「貼上」';
+  b.querySelector('button').disabled = true;
+  const el = $('#mainInput');
+  el.focus();
+  el.scrollIntoView({ block: 'center' });
+}
+const isImageFile = f => !!f && ((f.type || '').startsWith('image/') || /\.(png|jpe?g|gif|webp|heic|heif)$/i.test(f.name || ''));
+function revokePreview(){ if (draft.previewURL && draft.previewURL.startsWith('blob:')) URL.revokeObjectURL(draft.previewURL); }
+// 分享上載但最後沒有儲存的檔案，從伺服器刪除
+function discardRemote(){
+  const f = draft.file;
+  if (f && f.remote && !f.consumed) { f.consumed = true; sb.storage.from(BUCKET).remove([f.path]); }
 }
 function setAttachment(file){
   $('#pasteBanner').hidden = true;
-  if (draft.previewURL) URL.revokeObjectURL(draft.previewURL);
+  $('#fileBanner').hidden = true;
+  discardRemote(); revokePreview();
   draft.file = file;
-  draft.previewURL = file.type.startsWith('image/') ? URL.createObjectURL(file) : '';
-  draft.title = file.type.startsWith('image/') ? '' : file.name;
+  const img = isImageFile(file);
+  draft.previewURL = img && !file.remote ? URL.createObjectURL(file) : '';
+  draft.title = img ? '' : file.name;
   draft.titleTouched = false;
   renderAttach(); analyzeDraft();
+  if (img && file.remote) {
+    sb.storage.from(BUCKET).createSignedUrl(file.path, 3600).then(({ data }) => {
+      if (data && draft.file === file) { draft.previewURL = data.signedUrl; renderAttach(); }
+    });
+  }
 }
 function removeAttachment(){
-  if (draft.previewURL) URL.revokeObjectURL(draft.previewURL);
+  discardRemote(); revokePreview();
   draft.file = null; draft.previewURL = ''; draft.title = '';
   renderAttach(); analyzeDraft();
 }
@@ -607,7 +666,7 @@ function analyzeDraft(){
   const text = $('#mainInput').value;
   draft.text = text;
   let kind = null, url = '';
-  if (draft.file) kind = draft.file.type.startsWith('image/') ? 'image' : 'file';
+  if (draft.file) kind = isImageFile(draft.file) ? 'image' : 'file';
   else {
     const m = text.match(URL_RE);
     if (m) { kind = 'link'; url = m[0].replace(/[.,;:!?]+$/, ''); }
@@ -796,7 +855,31 @@ async function save(){
     if (c === 'works') row.work_type = nz(draft.workType);
     if (c === 'essay') row.entry_date = draft.entryDate || todayStr();
     if (c === 'buy') { row.price = nz(draft.price.trim()); row.shop = nz(draft.shop.trim()); }
-    if (draft.file) {
+    if (draft.file && draft.file.remote) {
+      const rf = draft.file;
+      const ext0 = ((rf.name.split('.').pop() || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8)) || 'bin';
+      let finalPath = `${user.id}/${crypto.randomUUID()}.${ext0}`, size = rf.size, mime = rf.type || null, moved = false;
+      if (k === 'image') {
+        const { data: blob } = await sb.storage.from(BUCKET).download(rf.path);
+        if (blob) {
+          const orig = new File([blob], rf.name, { type: rf.type || blob.type || 'image/jpeg' });
+          const c = await compressImage(orig);
+          if (c !== orig) {
+            finalPath = `${user.id}/${crypto.randomUUID()}.jpg`;
+            const { error: upErr } = await sb.storage.from(BUCKET).upload(finalPath, c, { contentType: 'image/jpeg' });
+            if (upErr) throw new Error('上載失敗：' + upErr.message);
+            await sb.storage.from(BUCKET).remove([rf.path]);
+            size = c.size; mime = 'image/jpeg'; moved = true;
+          }
+        }
+      }
+      if (!moved) {
+        const { error: mvErr } = await sb.storage.from(BUCKET).move(rf.path, finalPath);
+        if (mvErr) throw new Error('儲存檔案失敗：' + mvErr.message);
+      }
+      rf.consumed = true;
+      Object.assign(row, { file_path: finalPath, file_name: rf.name, file_size: size, file_mime: mime });
+    } else if (draft.file) {
       const f = k === 'image' ? await compressImage(draft.file) : draft.file;
       const ext = ((f.name.split('.').pop() || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8)) || 'bin';
       const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
@@ -818,7 +901,7 @@ async function save(){
   }
 }
 function resetDraft(){
-  if (draft.previewURL) URL.revokeObjectURL(draft.previewURL);
+  revokePreview();
   titleReq++;
   draft = newDraft(); ui.showMore = false;
   $('#mainInput').value = '';
@@ -1091,8 +1174,9 @@ document.addEventListener('click', async e => {
     case 'more': ui.showMore = true; renderDraftExtra(); break;
     case 'note': draft.showNote = true; renderDraftExtra(); $('#draftExtra [data-f="note"]')?.focus(); break;
     case 'save': save(); break;
-    case 'clear': resetDraft(); break;
+    case 'clear': discardRemote(); resetDraft(); break;
     case 'paste': pasteFromClipboard(); break;
+    case 'pickFileBanner': $('#pickFile').click(); break;
     case 'removeAttach': removeAttachment(); break;
     case 'toggle': toggleDone(id); break;
     case 'expand': { const box = a.previousElementSibling; box.classList.toggle('clamp'); a.textContent = box.classList.contains('clamp') ? '展開' : '收起'; break; }
