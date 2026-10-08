@@ -329,7 +329,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 /* ============ 設定 ============
    直接在這裏填入，就不用每部裝置各自輸入一次。
    anon key 是公開用的，資料靠 Supabase 的權限規則保護。 */
-const APP_VERSION = 'v1.7';
+const APP_VERSION = 'v1.7.1';
 const SUPABASE_URL = 'https://evbzbvvyqaxakbeslqgn.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_LKT5CR-u3eWAkRQ-wmp_0g_yEmwFmf6';
 
@@ -990,8 +990,9 @@ function sortItems(list, byDue){
 }
 function renderCatBar(){
   const counts = {}; let all = 0;
-  // 數字只計「待處理」，收藏的不計
-  for (const i of items) if (!i.done_at && !isKeep(i)) { counts[i.category] = (counts[i.category] || 0) + 1; all++; }
+  // 數字跟住「全部／待處理／收藏」的選擇
+  const inScope = i => ui.scope === 'all' || (ui.scope === 'keep') === isKeep(i);
+  for (const i of items) if (!i.done_at && inScope(i)) { counts[i.category] = (counts[i.category] || 0) + 1; all++; }
   const q = ui.search.trim();
   const chip = (id, name, c, n, extra = '') => `<button type="button" class="cat-chip ${!q && ui.viewCat === id ? 'selected' : ''}" style="--c:${c}" data-view="${id}">${esc(name)}${extra}<span class="count">${n || ''}</span></button>`;
   const scopeLabel = ui.scope === 'all' ? '全部' : SCOPES[ui.scope];
