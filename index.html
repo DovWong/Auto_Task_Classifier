@@ -212,6 +212,12 @@ a.i-url:hover{color:var(--accent);text-decoration:underline}
 .mgr-item.dragging{opacity:.6;background:var(--surface-2);border-radius:10px}
 .handle{font-size:20px;color:var(--ink-2);padding:6px 4px;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;flex:none}
 .mini.on{background:var(--accent);border-color:var(--accent)}
+.tap{border:0;background:none;padding:0;font:inherit;color:inherit;cursor:pointer;display:inline-flex}
+.badge.add{background:transparent;border-style:dashed;color:var(--ink-2)}
+.tap-area{cursor:text;border-radius:6px}
+.tap-area:hover{background:var(--surface-2)}
+.pen{border:0;background:none;color:var(--ink-2);font-size:14px;padding:0 6px;vertical-align:baseline}
+.link-main .i-title{display:inline}
 input[type=range]{width:100%;accent-color:var(--accent)}
 
 .lightbox{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px);cursor:zoom-out;overflow:auto}
@@ -792,8 +798,8 @@ function fieldsHTML(){
   }
   if (c === 'buy') {
     h += `<div class="field-row"><div class="field"><label>價錢</label><input class="input" data-f="price" inputmode="decimal" placeholder="$" value="${esc(draft.price)}"></div>
-      <div class="field"><label>在哪裏買</label><input class="input" data-f="shop" list="shopList" value="${esc(draft.shop)}"></div></div>
-      <div class="seg" style="margin-top:8px">${SHOPS.map(x => `<button type="button" data-shop="${esc(x)}" class="${draft.shop === x ? 'on' : ''}">${esc(x)}</button>`).join('')}</div>`;
+      <div class="field"><label>在哪裏買</label><input class="input" data-f="shop" value="${esc(draft.shop)}"></div></div>
+      <div class="seg" style="margin-top:8px">${allShops().map(x => `<button type="button" data-shop="${esc(x)}" class="${draft.shop === x ? 'on' : ''}">${esc(x)}</button>`).join('')}</div>`;
   }
   h += (draft.showNote || draft.note)
     ? `<div class="field"><label>備註</label><textarea class="input" data-f="note" rows="2">${esc(draft.note)}</textarea></div>`
@@ -988,7 +994,7 @@ function renderView(){
       `<button type="button" data-wf="${w}" class="${ui.workFilter === w ? 'on' : ''}">${w === 'all' ? '全部' : w}</button>`).join('')}</div>`;
   }
   if (catId === 'buy') {
-    const shops = [...new Set([...SHOPS, ...items.filter(i => i.category === 'buy' && !i.done_at && i.shop).map(i => i.shop)])];
+    const shops = allShops();
     const cnt = x => items.filter(i => i.category === 'buy' && !i.done_at && (x === '__none' ? !i.shop : i.shop === x)).length;
     extra += `<div class="seg view-filter"><button type="button" data-sf="all" class="${ui.shopFilter === 'all' ? 'on' : ''}">全部</button>${shops.map(x =>
       `<button type="button" data-sf="${esc(x)}" class="${ui.shopFilter === x ? 'on' : ''}">${esc(x)} ${cnt(x)}</button>`).join('')}${cnt('__none') ? `<button type="button" data-sf="__none" class="${ui.shopFilter === '__none' ? 'on' : ''}">未填 ${cnt('__none')}</button>` : ''}</div>`;
@@ -1027,44 +1033,46 @@ function itemHTML(it){
   const cat = CAT[it.category] || { name: it.category, c: '#888' };
   const showCat = ui.search.trim() || ui.viewCat === 'all';
   const badges = [];
-  if (showCat) badges.push(`<span class="badge cat" style="--c:${cat.c}">${esc(cat.name)}</span>`);
+  if (showCat) badges.push(`<button type="button" class="badge cat tap" style="--c:${cat.c}" data-act="moveMenu">${esc(cat.name)}</button>`);
   let body = '';
 
   if (it.category === 'essay') {
-    if (it.title) body += `<div class="i-essay-title">${esc(it.title)}</div>`;
+    if (it.title) body += `<div class="i-essay-title tap-area" data-act="ef" data-f="title">${esc(it.title)}</div>`;
   }
   if (it.kind === 'link') {
     const yid = siteType(it.content) === 'youtube' ? ytId(it.content) : null;
-    body += `<div class="link-row"><div class="link-main"><a class="i-title" href="${esc(it.content)}" target="_blank" rel="noopener">${esc(it.title || it.content)}</a>
+    body += `<div class="link-row"><div class="link-main"><a class="i-title" href="${esc(it.content)}" target="_blank" rel="noopener">${esc(it.title || it.content)}</a><button type="button" class="pen" data-act="ef" data-f="title" aria-label="改標題">✎</button>
       <a class="i-url" href="${esc(it.content)}" target="_blank" rel="noopener">${esc(it.content)}</a></div>
       ${yid ? `<a href="${esc(it.content)}" target="_blank" rel="noopener"><img class="yt-thumb" loading="lazy" src="https://i.ytimg.com/vi/${esc(yid)}/mqdefault.jpg" alt=""></a>` : ''}</div>`;
     badges.push(`<span class="badge">${esc(linkLabel(it.content))}</span>`);
   } else if (it.kind === 'text') {
-    if (it.category === 'works') body += `<div class="i-title">${esc(it.content)}</div>`;
-    else body += clampBlock(it.content || '', it.category === 'essay' ? 'essay' : '');
+    if (it.category === 'works') body += `<div class="i-title tap-area" data-act="ef" data-f="content">${esc(it.content)}</div>`;
+    else body += `<div class="tap-area" data-act="ef" data-f="content">${clampBlock(it.content || '', it.category === 'essay' ? 'essay' : '')}</div>`;
   } else if (it.kind === 'image') {
-    if (it.title && it.category !== 'essay') body += `<div class="i-title">${esc(it.title)}</div>`;
+    if (it.title && it.category !== 'essay') body += `<div class="i-title tap-area" data-act="ef" data-f="title">${esc(it.title)}</div>`;
     body += `<img class="i-img" data-path="${esc(it.file_path)}" alt="${esc(it.title || '圖片')}" loading="lazy">`;
-    if (it.content) body += clampBlock(it.content);
+    if (it.content) body += `<div class="tap-area" data-act="ef" data-f="content">${clampBlock(it.content)}</div>`;
   } else if (it.kind === 'file') {
-    body += `<div class="file-row"><span class="file-ico">📄</span><div style="flex:1;min-width:0"><div class="i-title">${esc(it.title || it.file_name)}</div>
+    body += `<div class="file-row"><span class="file-ico">📄</span><div style="flex:1;min-width:0"><div class="i-title tap-area" data-act="ef" data-f="title">${esc(it.title || it.file_name)}</div>
       <div class="i-url">${fmtSize(it.file_size || 0)}</div></div><button type="button" class="ghost-btn sm" data-act="download">下載</button></div>`;
-    if (it.content) body += clampBlock(it.content);
+    if (it.content) body += `<div class="tap-area" data-act="ef" data-f="content">${clampBlock(it.content)}</div>`;
   }
 
-  if (it.category === 'todo' && it.due_date && !done) badges.push(dueBadge(it.due_date));
+  const tap = (f, html) => `<button type="button" class="tap" data-act="ef" data-f="${f}">${html}</button>`;
+  const add = (f, label) => tap(f, `<span class="badge add">＋${label}</span>`);
+  if (it.category === 'todo' && !done) badges.push(it.due_date ? tap('due_date', dueBadge(it.due_date)) : add('due_date', '限期'));
   if (it.category === 'works') {
-    if (it.work_type) badges.push(`<span class="badge">${esc(it.work_type)}</span>`);
+    badges.push(it.work_type ? tap('work_type', `<span class="badge">${esc(it.work_type)}</span>`) : add('work_type', '類型'));
     const name = it.kind === 'link' ? (it.title || '') : (it.content || it.title || '');
     if (name) badges.push(`<a class="ghost-btn sm" href="https://www.google.com/search?q=${encodeURIComponent(name + (it.work_type && it.work_type !== '其他' ? ' ' + it.work_type : ''))}" target="_blank" rel="noopener">Google</a>`);
   }
   if (it.category === 'buy') {
-    if (it.price) badges.push(`<span class="badge">$${esc(String(it.price).replace(/^\$/, ''))}</span>`);
-    if (it.shop) badges.push(`<span class="badge">${esc(it.shop)}</span>`);
+    badges.push(it.shop ? tap('shop', `<span class="badge">🛒 ${esc(it.shop)}</span>`) : add('shop', '在哪裏買'));
+    badges.push(it.price ? tap('price', `<span class="badge">$${esc(String(it.price).replace(/^\$/, ''))}</span>`) : add('price', '價錢'));
   }
-  badges.push(`<span>${it.category === 'essay' && it.entry_date ? fmtDay(it.entry_date) : fmtDate(it.created_at)}</span>`);
+  badges.push(it.category === 'essay' ? tap('entry_date', `<span>${fmtDay(it.entry_date || ymd(new Date(it.created_at)))}</span>`) : `<span>${fmtDate(it.created_at)}</span>`);
 
-  const note = it.note ? `<div class="i-note">${linkify(it.note)}</div>` : '';
+  const note = it.note ? `<div class="i-note tap-area" data-act="ef" data-f="note">${linkify(it.note)}</div>` : '';
   let countdown = '';
   if (done) {
     const left = Math.ceil((new Date(it.done_at).getTime() + DONE_DAYS * 864e5 - Date.now()) / 864e5);
@@ -1160,7 +1168,7 @@ function renderEdit(){
   if (c === 'todo') h += f('限期', inp('due_date', 'type="date"'));
   if (c === 'works') h += f('類型', `<select class="input" data-e="work_type"><option value="">未選</option>${WORK_TYPES.map(w => `<option ${s.work_type === w ? 'selected' : ''}>${w}</option>`).join('')}</select>`);
   if (c === 'essay') h += f('日期', inp('entry_date', 'type="date"'));
-  if (c === 'buy') h += `<div class="field-row">${f('價錢', inp('price', 'inputmode="decimal"'))}${f('在哪裏買', inp('shop', 'list="shopList"'))}</div>`;
+  if (c === 'buy') h += `<div class="field-row">${f('價錢', inp('price', 'inputmode="decimal"'))}${f('在哪裏買', inp('shop'))}</div>`;
   h += f('備註', ta('note', 2));
   h += `<div class="sheet-foot"><button type="button" class="ghost-btn" data-act="close">取消</button><button type="button" class="btn-primary inline" data-act="saveEdit">儲存</button></div>`;
   openSheet(h);
@@ -1200,6 +1208,55 @@ function openSettings(){
     <button type="button" data-act="logout" class="danger">登出</button></div>
     <p class="hint">已登入：${esc(user?.email || '')}</p>
     <button type="button" class="ghost-btn full" data-act="close">關閉</button>`);
+}
+
+/* ============ 撳一下直接修改單一欄位 ============ */
+function allShops(){
+  return [...new Set([...SHOPS, ...items.filter(i => i.category === 'buy' && i.shop).map(i => i.shop.trim())])].filter(Boolean);
+}
+let fe = null;
+const FE_LABEL = { title:'標題', content:'內容', note:'備註', due_date:'限期', work_type:'作品類型', shop:'在哪裏買', price:'價錢', entry_date:'日期' };
+function openFieldEdit(id, f){
+  const it = findItem(id); if (!it) return;
+  fe = { id, f };
+  const v = it[f] ?? '';
+  const pick = (val, label, on) => `<button type="button" data-act="fePick" data-v="${esc(val)}" class="${on ? 'on' : ''}">${esc(label)}</button>`;
+  let body = '';
+  if (f === 'content' || f === 'note' || (f === 'title' && it.category === 'essay')) {
+    body = `<textarea class="input" data-fe rows="${f === 'content' && it.category !== 'works' ? 6 : 3}">${esc(v)}</textarea>`;
+  } else if (f === 'title') {
+    body = `<input class="input" data-fe value="${esc(v)}">`;
+  } else if (f === 'due_date') {
+    const t = todayStr();
+    body = `<input type="date" class="input" data-fe value="${esc(v)}">
+      <div class="seg" style="margin-top:10px">${pick(t, '今日')}${pick(addDays(t, 1), '明日')}${pick(addDays(t, 7), '一星期後')}${pick('', '不設')}</div>`;
+  } else if (f === 'entry_date') {
+    body = `<input type="date" class="input" data-fe value="${esc(v)}">`;
+  } else if (f === 'work_type') {
+    body = `<div class="seg">${WORK_TYPES.map(w => pick(w, w, v === w)).join('')}${pick('', '不選')}</div>`;
+  } else if (f === 'shop') {
+    body = `<div class="seg" style="margin-bottom:10px">${allShops().map(x => pick(x, x, v === x)).join('')}${v ? pick('', '清除') : ''}</div>
+      <input class="input" data-fe value="${esc(v)}" placeholder="或者自己輸入，例如 Facebook">`;
+  } else if (f === 'price') {
+    body = `<input class="input" data-fe inputmode="decimal" placeholder="$" value="${esc(v)}">`;
+  }
+  const needSave = !['work_type'].includes(f);
+  openSheet(`<h3>${FE_LABEL[f] || '修改'}</h3><div class="sheet-title">${esc(summaryOf(it))}</div>${body}
+    <div class="sheet-foot"><button type="button" class="ghost-btn" data-act="close">取消</button>
+    ${needSave ? '<button type="button" class="btn-primary inline" data-act="feSave">儲存</button>' : ''}</div>`);
+  const el = $('#layer [data-fe]');
+  if (el && f !== 'due_date' && f !== 'entry_date') { el.focus(); if (el.setSelectionRange) { const n = el.value.length; el.setSelectionRange(n, n); } }
+}
+async function saveFieldEdit(picked){
+  if (!fe) return;
+  const it = findItem(fe.id); if (!it) return;
+  let v = picked != null ? picked : ($('#layer [data-fe]')?.value ?? '');
+  v = typeof v === 'string' ? v.trim() : v;
+  if (fe.f === 'content' && it.kind === 'text' && !v) { toast('內容不可以留空', true); return; }
+  const patch = { [fe.f]: nz(v) };
+  if (fe.f === 'entry_date' && !v) patch.entry_date = ymd(new Date(it.created_at));
+  const ok = await updateItem(fe.id, patch);
+  if (ok) { fe = null; closeSheet(); }
 }
 
 /* ============ 分類設定（同步到 Supabase） ============ */
@@ -1359,6 +1416,7 @@ document.addEventListener('click', async e => {
   const img = t.closest('img[data-path]');
   if (img && img.src) { $('img', lb).src = img.src; lb.hidden = false; return; }
 
+  if (t.closest('a')) return;
   const a = t.closest('[data-act]'); if (!a) return;
   const id = a.dataset.id || a.closest('[data-id]')?.dataset.id;
   switch (a.dataset.act) {
@@ -1374,6 +1432,9 @@ document.addEventListener('click', async e => {
     case 'download': downloadItem(id); break;
     case 'menu': openMenu(id); break;
     case 'edit': openEdit(id); break;
+    case 'ef': openFieldEdit(id, a.dataset.f); break;
+    case 'feSave': saveFieldEdit(); break;
+    case 'fePick': saveFieldEdit(a.dataset.v); break;
     case 'moveMenu': openMove(id); break;
     case 'moveTo': { const cat = a.dataset.cat; if (await updateItem(id, { category: cat })) { closeSheet(); toast(`已轉到「${CAT[cat].name}」`); } break; }
     case 'copy': {
@@ -1398,6 +1459,12 @@ document.addEventListener('click', async e => {
   }
 });
 
+$('#layer').addEventListener('keydown', e => {
+  if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
+  if (e.target.id === 'mgrNewShop') { e.preventDefault(); mgrAction('mgrShopAdd', e.target); }
+  else if (e.target.id === 'mgrNew') { e.preventDefault(); mgrAction('mgrAdd', e.target); }
+  else if (e.target.dataset.fe != null && e.target.tagName === 'INPUT') { e.preventDefault(); saveFieldEdit(); }
+});
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { if (!lb.hidden) { lb.hidden = true; return; } closeSheet(); }
 });
