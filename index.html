@@ -199,8 +199,19 @@ a.i-url:hover{color:var(--accent);text-decoration:underline}
 .swatch{width:34px;height:34px;border-radius:9px;border:0;background:var(--c);flex:none}
 .mini{width:34px;height:38px;border:1px solid var(--line);border-radius:8px;background:var(--surface);flex:none;padding:0}
 .mini:disabled{opacity:.3;cursor:default}
-.mgr-sub{font-size:12px;color:var(--ink-2);margin:3px 0 0 40px}
+.mgr-sub{font-size:12px;color:var(--ink-2);margin:3px 0 0 70px}
 .pri-n{display:inline-grid;place-items:center;min-width:20px;height:20px;border-radius:10px;background:var(--c);color:#fff;font-size:12px;font-family:var(--body);font-weight:700}
+.side-todo{display:none}
+@media (min-width:960px){
+  .side-todo{display:block;margin-top:28px;border-top:1.5px solid var(--line);padding-top:14px}
+  .side-todo .item{padding:10px 2px}
+  .side-todo .badge.cat{display:none}
+}
+.side-head{font-family:var(--display);font-size:22px;font-weight:700;display:flex;align-items:center;gap:10px}
+.side-head::before{content:"";width:7px;height:22px;border-radius:4px;background:var(--c)}
+.mgr-item.dragging{opacity:.6;background:var(--surface-2);border-radius:10px}
+.handle{font-size:20px;color:var(--ink-2);padding:6px 4px;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;flex:none}
+.mini.on{background:var(--accent);border-color:var(--accent)}
 input[type=range]{width:100%;accent-color:var(--accent)}
 
 .lightbox{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px);cursor:zoom-out;overflow:auto}
@@ -274,6 +285,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
         </div>
       </div>
       <div id="draftExtra"></div>
+      <div id="sideTodo" class="side-todo"></div>
     </section>
 
     <section class="pane pane-view" id="paneView">
@@ -314,8 +326,8 @@ const DEFAULT_CATS = [
   {id:'works',    name:'作品',     c:'#B5487D'},
   {id:'essay',    name:'隨筆',     c:'#7A8B3A'},
   {id:'remind',   name:'提醒自己', c:'#C9A227'},
-  {id:'goodtext', name:'好文',     c:'#3D5A80'},
-  {id:'memory',   name:'回憶',     c:'#C26A4A'},
+  {id:'goodtext', name:'好文',     c:'#3D5A80', keep:true},
+  {id:'memory',   name:'回憶',     c:'#C26A4A', keep:true},
   {id:'temp',     name:'暫存',     c:'#7A8580'},
 ];
 let CATS = DEFAULT_CATS.map(c => ({ ...c }));
@@ -336,6 +348,7 @@ const DEFAULT_PRIORITY = {
   file:     ['temp'],
 };
 let PRIORITY = JSON.parse(JSON.stringify(DEFAULT_PRIORITY));
+let SHOPS = ['淘寶'];
 const DONE_DAYS = 7;
 const BUCKET = 'captures';
 const CHECK_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -443,7 +456,7 @@ function summaryOf(it){
 
 /* ============ state ============ */
 let sb = null, user = null, items = [], signed = {}, saving = false, editState = null, lastRandom = null;
-const ui = { tab:'input', viewCat: localStorage.getItem('lastCat') || 'all', search:'', workFilter:'all', showMore:false };
+const ui = { tab:'input', viewCat: localStorage.getItem('lastCat') || 'all', search:'', workFilter:'all', shopFilter:'all', showMore:false };
 let draft = newDraft();
 function newDraft(){
   return { kind:null, text:'', url:'', file:null, previewURL:'', cat:null, title:'', titleTouched:false, titleState:'idle',
@@ -504,6 +517,7 @@ let rtTimer;
 async function startApp(){
   showScreen('main');
   await loadSettings();
+  renderShopList();
   readParams();
   renderDraftExtra();
   await loadItems();
@@ -778,7 +792,8 @@ function fieldsHTML(){
   }
   if (c === 'buy') {
     h += `<div class="field-row"><div class="field"><label>價錢</label><input class="input" data-f="price" inputmode="decimal" placeholder="$" value="${esc(draft.price)}"></div>
-      <div class="field"><label>在哪裏買</label><input class="input" data-f="shop" value="${esc(draft.shop)}"></div></div>`;
+      <div class="field"><label>在哪裏買</label><input class="input" data-f="shop" list="shopList" value="${esc(draft.shop)}"></div></div>
+      <div class="seg" style="margin-top:8px">${SHOPS.map(x => `<button type="button" data-shop="${esc(x)}" class="${draft.shop === x ? 'on' : ''}">${esc(x)}</button>`).join('')}</div>`;
   }
   h += (draft.showNote || draft.note)
     ? `<div class="field"><label>備註</label><textarea class="input" data-f="note" rows="2">${esc(draft.note)}</textarea></div>`
@@ -934,6 +949,7 @@ function visibleItems(){
   if (q) list = list.filter(i => [i.title, i.content, i.note, i.file_name, i.shop, i.work_type].some(v => v && v.toLowerCase().includes(q)));
   else if (ui.viewCat !== 'all') list = list.filter(i => i.category === ui.viewCat);
   if (!q && ui.viewCat === 'works' && ui.workFilter !== 'all') list = list.filter(i => i.work_type === ui.workFilter);
+  if (!q && ui.viewCat === 'buy' && ui.shopFilter !== 'all') list = list.filter(i => ui.shopFilter === '__none' ? !i.shop : i.shop === ui.shopFilter);
   return sortItems(list, !q && ui.viewCat === 'todo');
 }
 function sortItems(list, byDue){
@@ -951,10 +967,10 @@ function sortItems(list, byDue){
 }
 function renderCatBar(){
   const counts = {}; let all = 0;
-  for (const i of items) if (!i.done_at) { counts[i.category] = (counts[i.category] || 0) + 1; all++; }
+  for (const i of items) if (!i.done_at) { counts[i.category] = (counts[i.category] || 0) + 1; if (!CAT[i.category]?.keep) all++; }
   const q = ui.search.trim();
-  const chip = (id, name, c, n) => `<button type="button" class="cat-chip ${!q && ui.viewCat === id ? 'selected' : ''}" style="--c:${c}" data-view="${id}">${esc(name)}<span class="count">${n || 0}</span></button>`;
-  $('#catBar').innerHTML = chip('all', '全部', 'var(--ink-2)', all) + CATS.map(c => chip(c.id, c.name, c.c, counts[c.id])).join('');
+  const chip = (id, name, c, n) => `<button type="button" class="cat-chip ${!q && ui.viewCat === id ? 'selected' : ''}" style="--c:${c}" data-view="${id}">${esc(name)}<span class="count">${n == null ? '' : n || 0}</span></button>`;
+  $('#catBar').innerHTML = chip('all', '全部', 'var(--ink-2)', all) + CATS.map(c => chip(c.id, (c.keep ? '📌 ' : '') + c.name, c.c, c.keep ? null : counts[c.id])).join('');
 }
 function renderView(){
   if (ui.viewCat !== 'all' && !CAT[ui.viewCat]) ui.viewCat = 'all';
@@ -962,7 +978,8 @@ function renderView(){
   const q = ui.search.trim();
   const catId = q ? null : ui.viewCat;
   const vis = visibleItems();
-  const activeN = vis.filter(i => !i.done_at).length;
+  const activeN = vis.filter(i => !i.done_at && (q || catId !== 'all' || !CAT[i.category]?.keep)).length;
+  const keepCat = catId && catId !== 'all' && CAT[catId]?.keep;
   const title = q ? `搜尋「${esc(q)}」` : catId === 'all' ? '全部' : esc(CAT[catId]?.name || '');
   const color = catId && catId !== 'all' ? CAT[catId].c : 'var(--ink-2)';
   let extra = '';
@@ -971,14 +988,27 @@ function renderView(){
       `<button type="button" data-wf="${w}" class="${ui.workFilter === w ? 'on' : ''}">${w === 'all' ? '全部' : w}</button>`).join('')}</div>`;
   }
   if (catId === 'buy') {
+    const shops = [...new Set([...SHOPS, ...items.filter(i => i.category === 'buy' && !i.done_at && i.shop).map(i => i.shop)])];
+    const cnt = x => items.filter(i => i.category === 'buy' && !i.done_at && (x === '__none' ? !i.shop : i.shop === x)).length;
+    extra += `<div class="seg view-filter"><button type="button" data-sf="all" class="${ui.shopFilter === 'all' ? 'on' : ''}">全部</button>${shops.map(x =>
+      `<button type="button" data-sf="${esc(x)}" class="${ui.shopFilter === x ? 'on' : ''}">${esc(x)} ${cnt(x)}</button>`).join('')}${cnt('__none') ? `<button type="button" data-sf="__none" class="${ui.shopFilter === '__none' ? 'on' : ''}">未填 ${cnt('__none')}</button>` : ''}</div>`;
     const sum = vis.filter(i => !i.done_at).map(i => parseFloat(String(i.price || '').replace(/[^\d.]/g, ''))).filter(n => !isNaN(n)).reduce((a, b) => a + b, 0);
     if (sum) extra += `<div class="view-sub">未買合共約 $${sum.toLocaleString()}</div>`;
   }
-  $('#viewHead').innerHTML = `<div class="view-headrow"><h2 class="view-title" style="--c:${color}">${title}<span class="view-count">${activeN}</span></h2>
+  $('#viewHead').innerHTML = `<div class="view-headrow"><h2 class="view-title" style="--c:${color}">${title}<span class="view-count">${keepCat ? `收藏 ${activeN} 項` : activeN}</span></h2>
     ${activeN && !q ? '<button type="button" class="ghost-btn" data-act="random">🎲 抽一個</button>' : ''}</div>${extra}`;
   $('#viewList').innerHTML = vis.length ? vis.map(itemHTML).join('')
     : `<div class="empty">${q ? '找不到符合的項目。' : '這裏還沒有項目。到「輸入」加第一個。'}</div>`;
+  renderSideTodo();
   fillImages();
+}
+// 電腦版：輸入區下面固定顯示 To do
+function renderSideTodo(){
+  const box = $('#sideTodo'); if (!box) return;
+  if (!CAT.todo) { box.innerHTML = ''; return; }
+  const list = sortItems(items.filter(i => i.category === 'todo' && !i.done_at), true);
+  box.innerHTML = `<div class="side-head" style="--c:${CAT.todo.c}"><span>${esc(CAT.todo.name)}</span><span class="view-count">${list.length}</span></div>` +
+    (list.length ? list.map(itemHTML).join('') : '<div class="hint" style="padding:12px 2px">沒有待辦事項 🎉</div>');
 }
 function dueBadge(due){
   const d = dayDiff(todayStr(), due);
@@ -1094,6 +1124,7 @@ function closeSheet(){ $('#layer').innerHTML = ''; editState = null; }
 $('#layer').addEventListener('click', e => { if (e.target.classList.contains('overlay')) closeSheet(); });
 $('#layer').addEventListener('input', e => {
   if (e.target.dataset.mgrName != null && mgr) { mgr.cats[+e.target.dataset.mgrName].name = e.target.value; return; }
+  if (e.target.dataset.mgrShop != null && mgr) { mgr.shops[+e.target.dataset.mgrShop] = e.target.value; return; }
   const k = e.target.dataset.e;
   if (k && editState) { editState[k] = e.target.value; if (k === 'category') renderEdit(); }
   if (e.target.dataset.range === 'threshold') { localStorage.setItem('simThreshold', e.target.value); $('#thVal').textContent = e.target.value + '%'; checkDupes(); }
@@ -1129,7 +1160,7 @@ function renderEdit(){
   if (c === 'todo') h += f('限期', inp('due_date', 'type="date"'));
   if (c === 'works') h += f('類型', `<select class="input" data-e="work_type"><option value="">未選</option>${WORK_TYPES.map(w => `<option ${s.work_type === w ? 'selected' : ''}>${w}</option>`).join('')}</select>`);
   if (c === 'essay') h += f('日期', inp('entry_date', 'type="date"'));
-  if (c === 'buy') h += `<div class="field-row">${f('價錢', inp('price', 'inputmode="decimal"'))}${f('在哪裏買', inp('shop'))}</div>`;
+  if (c === 'buy') h += `<div class="field-row">${f('價錢', inp('price', 'inputmode="decimal"'))}${f('在哪裏買', inp('shop', 'list="shopList"'))}</div>`;
   h += f('備註', ta('note', 2));
   h += `<div class="sheet-foot"><button type="button" class="ghost-btn" data-act="close">取消</button><button type="button" class="btn-primary inline" data-act="saveEdit">儲存</button></div>`;
   openSheet(h);
@@ -1177,36 +1208,46 @@ async function loadSettings(){
   if (error || !data || !data.data) return;
   const d = data.data;
   if (Array.isArray(d.cats) && d.cats.length) { CATS = d.cats; rebuildCats(); }
+  if (Array.isArray(d.shops)) SHOPS = d.shops;
+  renderShopList();
   if (d.priority) PRIORITY = { ...JSON.parse(JSON.stringify(DEFAULT_PRIORITY)), ...d.priority };
 }
 async function saveSettings(){
-  const { error } = await sb.from('settings').upsert({ user_id: user.id, data: { cats: CATS, priority: PRIORITY }, updated_at: new Date().toISOString() });
+  const { error } = await sb.from('settings').upsert({ user_id: user.id, data: { cats: CATS, priority: PRIORITY, shops: SHOPS }, updated_at: new Date().toISOString() });
   if (error) { toast('設定儲存失敗：請先在 Supabase 執行 settings.sql', true); return false; }
   return true;
 }
 let mgr = null;
 function openManager(){
-  mgr = { cats: CATS.map(c => ({ ...c })), priority: JSON.parse(JSON.stringify(PRIORITY)), tab: 'cats', kind: 'youtube' };
+  mgr = { cats: CATS.map(c => ({ ...c })), priority: JSON.parse(JSON.stringify(PRIORITY)), shops: [...SHOPS], tab: 'cats', kind: 'youtube' };
   renderManager();
 }
 function renderManager(){
   const counts = {}; for (const i of items) counts[i.category] = (counts[i.category] || 0) + 1;
   let h = `<h3>管理分類</h3><div class="seg" style="margin:10px 0 6px">
     <button type="button" data-act="mgrTab" data-tab-id="cats" class="${mgr.tab === 'cats' ? 'on' : ''}">分類</button>
-    <button type="button" data-act="mgrTab" data-tab-id="pri" class="${mgr.tab === 'pri' ? 'on' : ''}">優先分類</button></div>`;
+    <button type="button" data-act="mgrTab" data-tab-id="pri" class="${mgr.tab === 'pri' ? 'on' : ''}">優先分類</button>
+    <button type="button" data-act="mgrTab" data-tab-id="shops" class="${mgr.tab === 'shops' ? 'on' : ''}">To buy 商店</button></div>`;
   if (mgr.tab === 'cats') {
-    h += mgr.cats.map((c, i) => {
+    h += `<div class="mgr-list" data-list="cats">` + mgr.cats.map((c, i) => {
       const n = counts[c.id] || 0;
-      return `<div class="mgr-row">
+      return `<div class="mgr-item" data-i="${i}"><div class="mgr-row">
+        <span class="handle" aria-label="按住拖動">⠿</span>
         <button type="button" class="swatch" style="--c:${c.c}" data-act="mgrColor" data-i="${i}" aria-label="轉顏色"></button>
         <input class="input" data-mgr-name="${i}" value="${esc(c.name)}">
-        <button type="button" class="mini" data-act="mgrUp" data-i="${i}" ${i === 0 ? 'disabled' : ''} aria-label="上移">↑</button>
-        <button type="button" class="mini" data-act="mgrDown" data-i="${i}" ${i === mgr.cats.length - 1 ? 'disabled' : ''} aria-label="下移">↓</button>
+        <button type="button" class="mini ${c.keep ? 'on' : ''}" data-act="mgrKeep" data-i="${i}" aria-label="收藏型">📌</button>
         <button type="button" class="mini" data-act="mgrDel" data-i="${i}" ${n ? 'disabled' : ''} aria-label="刪除">✕</button></div>
-        <div class="mgr-sub">${n ? `${n} 個項目` : '沒有項目'}${CAT_FIELDS[c.id] ? `，附加欄位：${CAT_FIELDS[c.id]}` : ''}</div>`;
-    }).join('');
+        <div class="mgr-sub">${n ? `${n} 個項目` : '沒有項目'}${c.keep ? '，收藏型（不計入數量）' : ''}${CAT_FIELDS[c.id] ? `，附加欄位：${CAT_FIELDS[c.id]}` : ''}</div></div>`;
+    }).join('') + `</div>`;
     h += `<div class="mgr-row" style="margin-top:16px"><input class="input" id="mgrNew" placeholder="新分類名稱"><button type="button" class="ghost-btn" data-act="mgrAdd">新增</button></div>
-      <p class="hint">撳色塊轉顏色。有項目的分類不能刪除，請先把項目轉到其他分類。</p>`;
+      <p class="hint">按住 ⠿ 上下拖動排次序；撳色塊轉顏色；📌 設為收藏型，數量不會計入。有項目的分類不能刪除，請先把項目轉到其他分類。</p>`;
+  } else if (mgr.tab === 'shops') {
+    h += `<div class="mgr-list" data-list="shops">` + mgr.shops.map((x, i) => `<div class="mgr-item" data-i="${i}"><div class="mgr-row">
+        <span class="handle" aria-label="按住拖動">⠿</span>
+        <input class="input" data-mgr-shop="${i}" value="${esc(x)}">
+        <button type="button" class="mini" data-act="mgrShopDel" data-i="${i}" aria-label="刪除">✕</button></div></div>`).join('') + `</div>`;
+    h += `<div class="mgr-row" style="margin-top:16px"><input class="input" id="mgrNewShop" placeholder="新商店，例如 HKTVmall"><button type="button" class="ghost-btn" data-act="mgrShopAdd">新增</button></div>
+      <p class="hint">這些商店會在 To buy 輸入時變成快選標籤，查看時亦可以按商店篩選。刪除商店不會影響已儲存的項目。</p>`;
   } else {
     const list = mgr.priority[mgr.kind] || [];
     h += `<div class="seg" style="margin-bottom:10px">${PRI_KINDS.map(([k, l]) =>
@@ -1225,8 +1266,14 @@ async function mgrAction(act, a){
   if (act === 'mgrTab') mgr.tab = a.dataset.tabId;
   else if (act === 'mgrKind') mgr.kind = a.dataset.k;
   else if (act === 'mgrColor') { const c = mgr.cats[i]; c.c = PALETTE[(PALETTE.indexOf(c.c) + 1) % PALETTE.length]; }
-  else if (act === 'mgrUp' && i > 0) [mgr.cats[i-1], mgr.cats[i]] = [mgr.cats[i], mgr.cats[i-1]];
-  else if (act === 'mgrDown' && i < mgr.cats.length - 1) [mgr.cats[i+1], mgr.cats[i]] = [mgr.cats[i], mgr.cats[i+1]];
+  else if (act === 'mgrKeep') mgr.cats[i].keep = !mgr.cats[i].keep;
+  else if (act === 'mgrShopDel') mgr.shops.splice(i, 1);
+  else if (act === 'mgrShopAdd') {
+    const name = ($('#mgrNewShop')?.value || '').trim();
+    if (!name) { toast('請輸入商店名稱', true); return; }
+    if (mgr.shops.includes(name)) { toast('已經有這間商店', true); return; }
+    mgr.shops.push(name);
+  }
   else if (act === 'mgrDel') {
     const id = mgr.cats[i].id;
     if (!confirm(`刪除分類「${mgr.cats[i].name}」？`)) return;
@@ -1249,14 +1296,49 @@ async function mgrAction(act, a){
     mgr.cats.forEach(c => c.name = c.name.trim());
     const ids = new Set(mgr.cats.map(c => c.id));
     for (const k in mgr.priority) mgr.priority[k] = mgr.priority[k].filter(x => ids.has(x));
-    const prevCats = CATS, prevPri = PRIORITY;
-    CATS = mgr.cats; PRIORITY = mgr.priority; rebuildCats();
-    if (!(await saveSettings())) { CATS = prevCats; PRIORITY = prevPri; rebuildCats(); return; }
+    mgr.shops = [...new Set(mgr.shops.map(x => x.trim()).filter(Boolean))];
+    const prevCats = CATS, prevPri = PRIORITY, prevShops = SHOPS;
+    CATS = mgr.cats; PRIORITY = mgr.priority; SHOPS = mgr.shops; rebuildCats();
+    if (!(await saveSettings())) { CATS = prevCats; PRIORITY = prevPri; SHOPS = prevShops; rebuildCats(); return; }
+    renderShopList();
     mgr = null; closeSheet(); renderDraftExtra(); renderView(); toast('分類已更新');
     return;
   }
   renderManager();
 }
+
+function renderShopList(){
+  let dl = document.getElementById('shopList');
+  if (!dl) { dl = document.createElement('datalist'); dl.id = 'shopList'; document.body.appendChild(dl); }
+  dl.innerHTML = SHOPS.map(x => `<option value="${esc(x)}">`).join('');
+}
+// 按住 ⠿ 拖動排序（手機和電腦都適用）
+let drag = null;
+$('#layer').addEventListener('pointerdown', e => {
+  const h = e.target.closest('.handle'); if (!h || !mgr) return;
+  e.preventDefault();
+  const item = h.closest('.mgr-item');
+  drag = { item, list: item.parentElement, id: e.pointerId };
+  item.classList.add('dragging');
+  h.setPointerCapture(e.pointerId);
+});
+$('#layer').addEventListener('pointermove', e => {
+  if (!drag || e.pointerId !== drag.id) return;
+  const sibs = [...drag.list.querySelectorAll('.mgr-item')].filter(x => x !== drag.item);
+  const next = sibs.find(x => { const r = x.getBoundingClientRect(); return e.clientY < r.top + r.height / 2; });
+  if (next) { if (drag.item.nextElementSibling !== next) drag.list.insertBefore(drag.item, next); }
+  else if (drag.list.lastElementChild !== drag.item) drag.list.appendChild(drag.item);
+});
+function endDrag(){
+  if (!drag) return;
+  const order = [...drag.list.querySelectorAll('.mgr-item')].map(x => +x.dataset.i);
+  const key = drag.list.dataset.list;
+  drag = null;
+  const old = mgr[key]; mgr[key] = order.map(i => old[i]);
+  renderManager();
+}
+$('#layer').addEventListener('pointerup', endDrag);
+$('#layer').addEventListener('pointercancel', endDrag);
 
 /* ============ lightbox ============ */
 const lb = $('#lightbox');
@@ -1270,7 +1352,9 @@ document.addEventListener('click', async e => {
   const due = t.closest('[data-due]'); if (due) { draft.due = due.dataset.due === 'clear' ? '' : addDays(todayStr(), +due.dataset.due); renderDraftExtra(); return; }
   const wt = t.closest('[data-wt]'); if (wt) { draft.workType = draft.workType === wt.dataset.wt ? '' : wt.dataset.wt; renderDraftExtra(); return; }
   const vw = t.closest('[data-view]');
-  if (vw) { ui.viewCat = vw.dataset.view; localStorage.setItem('lastCat', ui.viewCat); ui.search = ''; $('#searchInput').value = ''; ui.workFilter = 'all'; renderView(); return; }
+  if (vw) { ui.viewCat = vw.dataset.view; localStorage.setItem('lastCat', ui.viewCat); ui.search = ''; $('#searchInput').value = ''; ui.workFilter = 'all'; ui.shopFilter = 'all'; renderView(); return; }
+  const sf = t.closest('[data-sf]'); if (sf) { ui.shopFilter = sf.dataset.sf; renderView(); return; }
+  const sh = t.closest('[data-shop]'); if (sh) { draft.shop = draft.shop === sh.dataset.shop ? '' : sh.dataset.shop; renderDraftExtra(); return; }
   const wf = t.closest('[data-wf]'); if (wf) { ui.workFilter = wf.dataset.wf; renderView(); return; }
   const img = t.closest('img[data-path]');
   if (img && img.src) { $('img', lb).src = img.src; lb.hidden = false; return; }
@@ -1304,7 +1388,8 @@ document.addEventListener('click', async e => {
     case 'close': closeSheet(); mgr = null; break;
     case 'manageCats': openManager(); break;
     case 'mgrTab': case 'mgrKind': case 'mgrColor': case 'mgrUp': case 'mgrDown':
-    case 'mgrDel': case 'mgrAdd': case 'mgrPri': case 'mgrSave': mgrAction(a.dataset.act, a); break;
+    case 'mgrDel': case 'mgrAdd': case 'mgrPri': case 'mgrSave': case 'mgrKeep':
+    case 'mgrShopDel': case 'mgrShopAdd': mgrAction(a.dataset.act, a); break;
     case 'saveEdit': saveEdit(); break;
     case 'settings': openSettings(); break;
     case 'reload': closeSheet(); await loadItems(); renderView(); toast('已重新載入'); break;
