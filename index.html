@@ -141,6 +141,15 @@ textarea.input{resize:vertical}
 .view-sub{font-size:14px;color:var(--ink-2);margin:2px 0 6px}
 .view-filter{margin:8px 0 4px}
 
+.ver{font-family:var(--body);font-size:12px;font-weight:400;color:var(--ink-2);vertical-align:middle}
+.i-side{display:flex;flex-direction:column;align-items:center;gap:2px}
+.keep-btn{border:0;background:transparent;width:32px;height:32px;border-radius:8px;padding:0;font-size:16px;filter:grayscale(1);opacity:.3}
+.keep-btn.on{filter:none;opacity:1}
+.keep-btn:hover{background:var(--surface-2)}
+.scope-menu{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.scope-menu button{border:0;border-top:1px solid var(--line);background:var(--surface);text-align:left;padding:14px 16px;font-size:16px;display:flex;justify-content:space-between}
+.scope-menu button:first-child{border-top:0}
+.scope-menu button.on{color:var(--accent);font-weight:600}
 .item{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;padding:14px 2px;border-bottom:1px solid var(--line)}
 .check{width:26px;height:26px;border-radius:7px;border:2px solid var(--ink-2);background:transparent;display:grid;place-items:center;margin-top:1px;padding:0;color:var(--accent-ink)}
 .check.on{background:var(--accent);border-color:var(--accent)}
@@ -192,7 +201,7 @@ a.i-url:hover{color:var(--accent);text-decoration:underline}
 .menu button.danger{color:var(--danger)}
 .sheet-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:18px;flex-wrap:wrap}
 .hint{font-size:13px;color:var(--ink-2)}
-.random-card .check,.random-card .more-btn{visibility:hidden}
+.random-card .check,.random-card .more-btn,.random-card .keep-btn{visibility:hidden}
 .random-card .item{border-bottom:0}
 .mgr-row{display:flex;gap:6px;align-items:center;margin-top:10px}
 .mgr-row .input{flex:1;padding:8px 10px}
@@ -263,7 +272,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 
 <div id="mainApp" hidden>
   <header class="top">
-    <h1 class="brand">收集箱</h1>
+    <h1 class="brand">收集箱 <span class="ver" id="verTag"></span></h1>
     <button class="icon-btn" data-act="settings" aria-label="設定">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
     </button>
@@ -320,6 +329,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 /* ============ 設定 ============
    直接在這裏填入，就不用每部裝置各自輸入一次。
    anon key 是公開用的，資料靠 Supabase 的權限規則保護。 */
+const APP_VERSION = 'v1.7';
 const SUPABASE_URL = 'https://evbzbvvyqaxakbeslqgn.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_LKT5CR-u3eWAkRQ-wmp_0g_yEmwFmf6';
 
@@ -462,7 +472,10 @@ function summaryOf(it){
 
 /* ============ state ============ */
 let sb = null, user = null, items = [], signed = {}, saving = false, editState = null, lastRandom = null;
-const ui = { tab:'input', viewCat: localStorage.getItem('lastCat') || 'all', search:'', workFilter:'all', shopFilter:'all', showMore:false };
+const ui = { tab:'input', viewCat: localStorage.getItem('lastCat') || 'all', search:'', workFilter:'all', shopFilter:'all', scope: localStorage.getItem('scope') || 'all', showMore:false };
+// 收藏：項目自己設定優先，否則跟分類的預設
+const isKeep = i => i.keep != null ? !!i.keep : !!CAT[i.category]?.keep;
+const SCOPES = { all:'全部', todo:'待處理', keep:'收藏' };
 let draft = newDraft();
 function newDraft(){
   return { kind:null, text:'', url:'', file:null, previewURL:'', cat:null, title:'', titleTouched:false, titleState:'idle',
@@ -522,6 +535,7 @@ $('#loginForm').addEventListener('submit', async e => {
 let rtTimer;
 async function startApp(){
   showScreen('main');
+  $('#verTag').textContent = APP_VERSION;
   await loadSettings();
   renderShopList();
   readParams();
@@ -956,11 +970,14 @@ function visibleItems(){
   else if (ui.viewCat !== 'all') list = list.filter(i => i.category === ui.viewCat);
   if (!q && ui.viewCat === 'works' && ui.workFilter !== 'all') list = list.filter(i => i.work_type === ui.workFilter);
   if (!q && ui.viewCat === 'buy' && ui.shopFilter !== 'all') list = list.filter(i => ui.shopFilter === '__none' ? !i.shop : i.shop === ui.shopFilter);
+  if (!q && ui.scope === 'todo') list = list.filter(i => !isKeep(i));
+  if (!q && ui.scope === 'keep') list = list.filter(i => isKeep(i));
   return sortItems(list, !q && ui.viewCat === 'todo');
 }
 function sortItems(list, byDue){
   const active = list.filter(i => !i.done_at), done = list.filter(i => i.done_at);
   active.sort((a, b) => {
+    if (isKeep(a) !== isKeep(b)) return isKeep(a) ? 1 : -1;
     if (byDue) {
       if (a.due_date && b.due_date && a.due_date !== b.due_date) return a.due_date < b.due_date ? -1 : 1;
       if (a.due_date && !b.due_date) return -1;
@@ -973,10 +990,12 @@ function sortItems(list, byDue){
 }
 function renderCatBar(){
   const counts = {}; let all = 0;
-  for (const i of items) if (!i.done_at) { counts[i.category] = (counts[i.category] || 0) + 1; if (!CAT[i.category]?.keep) all++; }
+  // 數字只計「待處理」，收藏的不計
+  for (const i of items) if (!i.done_at && !isKeep(i)) { counts[i.category] = (counts[i.category] || 0) + 1; all++; }
   const q = ui.search.trim();
-  const chip = (id, name, c, n) => `<button type="button" class="cat-chip ${!q && ui.viewCat === id ? 'selected' : ''}" style="--c:${c}" data-view="${id}">${esc(name)}<span class="count">${n == null ? '' : n || 0}</span></button>`;
-  $('#catBar').innerHTML = chip('all', '全部', 'var(--ink-2)', all) + CATS.map(c => chip(c.id, (c.keep ? '📌 ' : '') + c.name, c.c, c.keep ? null : counts[c.id])).join('');
+  const chip = (id, name, c, n, extra = '') => `<button type="button" class="cat-chip ${!q && ui.viewCat === id ? 'selected' : ''}" style="--c:${c}" data-view="${id}">${esc(name)}${extra}<span class="count">${n || ''}</span></button>`;
+  const scopeLabel = ui.scope === 'all' ? '全部' : SCOPES[ui.scope];
+  $('#catBar').innerHTML = chip('all', scopeLabel, 'var(--ink-2)', all, ' ▾') + CATS.map(c => chip(c.id, (c.keep ? '📌 ' : '') + c.name, c.c, counts[c.id])).join('');
 }
 function renderView(){
   if (ui.viewCat !== 'all' && !CAT[ui.viewCat]) ui.viewCat = 'all';
@@ -984,9 +1003,9 @@ function renderView(){
   const q = ui.search.trim();
   const catId = q ? null : ui.viewCat;
   const vis = visibleItems();
-  const activeN = vis.filter(i => !i.done_at && (q || catId !== 'all' || !CAT[i.category]?.keep)).length;
-  const keepCat = catId && catId !== 'all' && CAT[catId]?.keep;
-  const title = q ? `搜尋「${esc(q)}」` : catId === 'all' ? '全部' : esc(CAT[catId]?.name || '');
+  const activeN = vis.filter(i => !i.done_at).length;
+  const todoN = vis.filter(i => !i.done_at && !isKeep(i)).length, keepN = activeN - todoN;
+  const title = (q ? `搜尋「${esc(q)}」` : catId === 'all' ? '全部' : esc(CAT[catId]?.name || '')) + (!q && ui.scope !== 'all' && catId !== 'all' ? `・${SCOPES[ui.scope]}` : !q && ui.scope !== 'all' ? `・${SCOPES[ui.scope]}` : '');
   const color = catId && catId !== 'all' ? CAT[catId].c : 'var(--ink-2)';
   let extra = '';
   if (catId === 'works') {
@@ -1001,7 +1020,7 @@ function renderView(){
     const sum = vis.filter(i => !i.done_at).map(i => parseFloat(String(i.price || '').replace(/[^\d.]/g, ''))).filter(n => !isNaN(n)).reduce((a, b) => a + b, 0);
     if (sum) extra += `<div class="view-sub">未買合共約 $${sum.toLocaleString()}</div>`;
   }
-  $('#viewHead').innerHTML = `<div class="view-headrow"><h2 class="view-title" style="--c:${color}">${title}<span class="view-count">${keepCat ? `收藏 ${activeN} 項` : activeN}</span></h2>
+  $('#viewHead').innerHTML = `<div class="view-headrow"><h2 class="view-title" style="--c:${color}">${title}<span class="view-count">${keepN && todoN ? `${todoN} 待處理 · ${keepN} 收藏` : keepN ? `收藏 ${keepN}` : todoN}</span></h2>
     ${activeN && !q ? '<button type="button" class="ghost-btn" data-act="random">🎲 抽一個</button>' : ''}</div>${extra}`;
   $('#viewList').innerHTML = vis.length ? vis.map(itemHTML).join('')
     : `<div class="empty">${q ? '找不到符合的項目。' : '這裏還沒有項目。到「輸入」加第一個。'}</div>`;
@@ -1012,7 +1031,7 @@ function renderView(){
 function renderSideTodo(){
   const box = $('#sideTodo'); if (!box) return;
   if (!CAT.todo) { box.innerHTML = ''; return; }
-  const list = sortItems(items.filter(i => i.category === 'todo' && !i.done_at), true);
+  const list = sortItems(items.filter(i => i.category === 'todo' && !i.done_at && !isKeep(i)), true);
   box.innerHTML = `<div class="side-head" style="--c:${CAT.todo.c}"><span>${esc(CAT.todo.name)}</span><span class="view-count">${list.length}</span></div>` +
     (list.length ? list.map(itemHTML).join('') : '<div class="hint" style="padding:12px 2px">沒有待辦事項 🎉</div>');
 }
@@ -1081,7 +1100,8 @@ function itemHTML(it){
   return `<article class="item ${done ? 'done' : ''}" data-id="${it.id}">
     <button type="button" class="check ${done ? 'on' : ''}" data-act="toggle" aria-label="${done ? '取消完成' : '標記完成'}">${done ? CHECK_SVG : ''}</button>
     <div class="i-body">${body}${note}<div class="i-meta">${badges.join('')}</div>${countdown}</div>
-    <button type="button" class="more-btn" data-act="menu" aria-label="更多">⋯</button></article>`;
+    <div class="i-side"><button type="button" class="more-btn" data-act="menu" aria-label="更多">⋯</button>
+    <button type="button" class="keep-btn ${isKeep(it) ? 'on' : ''}" data-act="keep" aria-label="${isKeep(it) ? '取消收藏' : '設為收藏'}" title="${isKeep(it) ? '收藏（不計入數量）' : '待處理'}">📌</button></div></article>`;
 }
 
 async function fillImages(){
@@ -1206,7 +1226,25 @@ function openSettings(){
     <button type="button" data-act="reload">重新載入資料</button>
     ${!SUPABASE_URL ? '<button type="button" data-act="resetConfig">更改 Supabase 連線</button>' : ''}
     <button type="button" data-act="logout" class="danger">登出</button></div>
-    <p class="hint">已登入：${esc(user?.email || '')}</p>
+    <p class="hint">已登入：${esc(user?.email || '')}　·　版本 ${APP_VERSION}</p>
+    <button type="button" class="ghost-btn full" data-act="close">關閉</button>`);
+}
+
+async function toggleKeep(id){
+  const it = findItem(id); if (!it) return;
+  const prev = it.keep, val = !isKeep(it);
+  it.keep = val; renderView();
+  const { error } = await sb.from('items').update({ keep: val }).eq('id', id);
+  if (error) {
+    it.keep = prev; renderView();
+    toast(/keep/.test(error.message) ? '請先在 Supabase 執行 keep.sql' : '更新失敗：' + error.message, true);
+  } else toast(val ? '已設為收藏，不計入數量' : '已設為待處理');
+}
+function openScope(){
+  const n = s => items.filter(i => !i.done_at && (s === 'all' || (s === 'keep') === isKeep(i))).length;
+  openSheet(`<h3>顯示哪些項目？</h3><div class="scope-menu">${Object.entries(SCOPES).map(([k, l]) =>
+    `<button type="button" data-act="scope" data-s="${k}" class="${ui.scope === k ? 'on' : ''}"><span>${l}</span><span>${n(k)}</span></button>`).join('')}</div>
+    <p class="hint">這個選擇亦會套用到每個分類。項目右邊的 📌 亮起就是收藏，不計入數量。</p>
     <button type="button" class="ghost-btn full" data-act="close">關閉</button>`);
 }
 
@@ -1409,6 +1447,7 @@ document.addEventListener('click', async e => {
   const due = t.closest('[data-due]'); if (due) { draft.due = due.dataset.due === 'clear' ? '' : addDays(todayStr(), +due.dataset.due); renderDraftExtra(); return; }
   const wt = t.closest('[data-wt]'); if (wt) { draft.workType = draft.workType === wt.dataset.wt ? '' : wt.dataset.wt; renderDraftExtra(); return; }
   const vw = t.closest('[data-view]');
+  if (vw && vw.dataset.view === 'all' && ui.viewCat === 'all' && !ui.search.trim()) { openScope(); return; }
   if (vw) { ui.viewCat = vw.dataset.view; localStorage.setItem('lastCat', ui.viewCat); ui.search = ''; $('#searchInput').value = ''; ui.workFilter = 'all'; ui.shopFilter = 'all'; renderView(); return; }
   const sf = t.closest('[data-sf]'); if (sf) { ui.shopFilter = sf.dataset.sf; renderView(); return; }
   const sh = t.closest('[data-shop]'); if (sh) { draft.shop = draft.shop === sh.dataset.shop ? '' : sh.dataset.shop; renderDraftExtra(); return; }
@@ -1433,6 +1472,8 @@ document.addEventListener('click', async e => {
     case 'menu': openMenu(id); break;
     case 'edit': openEdit(id); break;
     case 'ef': openFieldEdit(id, a.dataset.f); break;
+    case 'keep': toggleKeep(id); break;
+    case 'scope': ui.scope = a.dataset.s; localStorage.setItem('scope', ui.scope); closeSheet(); renderView(); break;
     case 'feSave': saveFieldEdit(); break;
     case 'fePick': saveFieldEdit(a.dataset.v); break;
     case 'moveMenu': openMove(id); break;
