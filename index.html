@@ -141,6 +141,9 @@ textarea.input{resize:vertical}
 .view-sub{font-size:14px;color:var(--ink-2);margin:2px 0 6px}
 .view-filter{margin:8px 0 4px}
 
+.net-bar{max-width:1200px;margin:0 auto 8px;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:14px;background:var(--surface-2);border-top:1px solid var(--line);border-bottom:1px solid var(--line);color:var(--ink-2)}
+.net-bar.off{color:var(--star)}
+.badge.pend{color:var(--star);border-color:var(--star)}
 .ver{font-family:var(--body);font-size:12px;font-weight:400;color:var(--ink-2);vertical-align:middle}
 .i-side{display:flex;flex-direction:column;align-items:center;gap:2px}
 .keep-btn{border:0;background:transparent;width:32px;height:32px;border-radius:8px;padding:0;font-size:16px;filter:grayscale(1);opacity:.3}
@@ -280,6 +283,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
     </button>
   </header>
 
+  <div id="netBar" class="net-bar" hidden></div>
   <main class="app">
     <section class="pane pane-input active" id="paneInput">
       <div id="pasteBanner" class="paste-banner" hidden>
@@ -332,7 +336,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 /* ============ 設定 ============
    直接在這裏填入，就不用每部裝置各自輸入一次。
    anon key 是公開用的，資料靠 Supabase 的權限規則保護。 */
-const APP_VERSION = 'v1.8';
+const APP_VERSION = 'v1.9';
 const SUPABASE_URL = 'https://evbzbvvyqaxakbeslqgn.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_LKT5CR-u3eWAkRQ-wmp_0g_yEmwFmf6';
 
@@ -516,8 +520,18 @@ async function boot(){
   await ensureSupabaseLib();
   sb = window.supabase.createClient(url, key, { auth: { persistSession: true, autoRefreshToken: true } });
   sb.auth.onAuthStateChange(ev => { if (ev === 'SIGNED_OUT') location.reload(); });
-  const { data: { session } } = await sb.auth.getSession();
-  if (!session) { showScreen('login'); return; }
+  let session = null;
+  // 網絡差時更新登入可能卡住，最多等 6 秒
+  if (navigator.onLine) try { session = (await withTimeout(sb.auth.getSession(), 6000)).data.session; } catch {}
+  if (!session) {
+    // 離線時讀不到最新登入狀態，先用手機上記住的帳戶
+    try {
+      const ref = new URL(url).hostname.split('.')[0];
+      const saved = JSON.parse(localStorage.getItem(`sb-${ref}-auth-token`) || 'null');
+      if (saved?.user) { user = saved.user; await startApp(); return; }   // 登入資料仍在，只是連不上伺服器
+    } catch {}
+    showScreen('login'); return;
+  }
   user = session.user;
   await startApp();
 }
@@ -540,26 +554,46 @@ let rtTimer;
 async function startApp(){
   showScreen('main');
   $('#verTag').textContent = APP_VERSION;
-  await loadSettings();
+  // 先用手機上的快取即時顯示，再向伺服器取最新資料
+  try { const sc = JSON.parse(localStorage.getItem('settingsCache') || 'null'); if (sc) applySettings(sc); } catch {}
   renderShopList();
   readParams();
   renderDraftExtra();
+  await loadPending();
+  items = mergePending((await cacheGet('items')) || []);
+  renderView(); updateNetBar();
+  await loadSettings();
+  renderDraftExtra();
   await loadItems();
   renderView();
-  cleanupDone();
-  cleanupTmp();
+  updateNetBar();
+  flushQueue();
+  if (navigator.onLine) { cleanupDone().catch(() => {}); cleanupTmp().catch(() => {}); }
   sb.channel('items-sync')
     .on('postgres_changes', { event:'*', schema:'public', table:'items' }, () => {
       clearTimeout(rtTimer); rtTimer = setTimeout(async () => { await loadItems(); renderView(); }, 500);
     }).subscribe();
   document.addEventListener('visibilitychange', async () => {
-    if (document.visibilityState === 'visible') { await loadItems(); renderView(); }
+    if (document.visibilityState === 'visible') { updateNetBar(); flushQueue(); await loadItems(); renderView(); }
   });
 }
 async function loadItems(){
-  const { data, error } = await sb.from('items').select('*').order('created_at', { ascending:false }).limit(5000);
-  if (error) { toast('讀取資料失敗：' + error.message, true); return; }
-  items = data || [];
+  let data = null, error = null;
+  if (!navigator.onLine) error = new NetErr('離線');
+  else try { ({ data, error } = await withTimeout(sb.from('items').select('*').order('created_at', { ascending:false }).limit(5000), 15000)); }
+  catch (e) { error = e; }
+  if (error) {
+    if (!items.filter(i => !i._pending).length) {
+      const cached = await cacheGet('items');
+      if (cached) items = mergePending(cached);
+      else items = mergePending([]);
+    }
+    if (!isNetErr(error)) toast('讀取資料失敗：' + error.message, true);
+    updateNetBar();
+    return;
+  }
+  items = mergePending(data || []);
+  cacheItems();
 }
 // 分享上載後超過一日仍未儲存的檔案，自動清走
 async function cleanupTmp(){
@@ -750,6 +784,7 @@ function updateKindHint(){
 let titleReq = 0;
 async function fetchTitle(url){
   const my = ++titleReq;
+  if (!navigator.onLine) { draft.titleState = 'offline'; updateTitleField(); return; }
   draft.titleState = 'loading'; updateTitleField();
   let title = '';
   const yid = siteType(url) === 'youtube' ? ytId(url) : null;
@@ -772,7 +807,7 @@ async function fetchTitle(url){
 function updateTitleField(){
   const el = $('#fTitle'); if (el && !draft.titleTouched) el.value = draft.title;
   const st = $('#titleState');
-  if (st) st.textContent = draft.titleState === 'loading' ? '讀取標題中…' : draft.titleState === 'failed' ? '讀取不到，請手動輸入' : '';
+  if (st) st.textContent = draft.titleState === 'loading' ? '讀取標題中…' : draft.titleState === 'failed' ? '讀取不到，請手動輸入' : draft.titleState === 'offline' ? '離線中，可以手動輸入或之後再改' : '';
 }
 
 function renderDraftExtra(){
@@ -903,7 +938,8 @@ async function save(){
   const btn = $('#saveBtn'); if (btn) { btn.disabled = true; btn.textContent = '儲存中…'; }
   try {
     const c = draft.cat, k = draft.kind;
-    const row = { category:c, kind:k, note: nz(draft.note.trim()), title:null, content:null };
+    // 預先定好 id，網絡差重試時不會重複新增
+    const row = { id: crypto.randomUUID(), created_at: new Date().toISOString(), category:c, kind:k, note: nz(draft.note.trim()), title:null, content:null };
     if (k === 'link') { row.content = draft.url; row.url_norm = normUrl(draft.url); row.title = nz(draft.title.trim()); }
     else if (k === 'text') { row.content = draft.text.trim(); if (c === 'essay') row.title = nz(draft.title.trim()); }
     else { row.content = nz(draft.text.trim()); row.title = nz(draft.title.trim()); }
@@ -911,7 +947,10 @@ async function save(){
     if (c === 'works') row.work_type = nz(draft.workType);
     if (c === 'essay') row.entry_date = draft.entryDate || todayStr();
     if (c === 'buy') { row.price = nz(draft.price.trim()); row.shop = nz(draft.shop.trim()); }
+
     if (draft.file && draft.file.remote) {
+      // 捷徑分享的檔案已經在伺服器上，必須連線
+      if (!navigator.onLine) throw new Error('離線中，分享過來的檔案要連線後先可以儲存');
       const rf = draft.file;
       const ext0 = ((rf.name.split('.').pop() || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8)) || 'bin';
       let finalPath = `${user.id}/${crypto.randomUUID()}.${ext0}`, size = rf.size, mime = rf.type || null, moved = false;
@@ -919,13 +958,13 @@ async function save(){
         const { data: blob } = await sb.storage.from(BUCKET).download(rf.path);
         if (blob) {
           const orig = new File([blob], rf.name, { type: rf.type || blob.type || 'image/jpeg' });
-          const c = await compressImage(orig);
-          if (c !== orig) {
+          const cimg = await compressImage(orig);
+          if (cimg !== orig) {
             finalPath = `${user.id}/${crypto.randomUUID()}.jpg`;
-            const { error: upErr } = await sb.storage.from(BUCKET).upload(finalPath, c, { contentType: 'image/jpeg' });
+            const { error: upErr } = await sb.storage.from(BUCKET).upload(finalPath, cimg, { contentType: 'image/jpeg' });
             if (upErr) throw new Error('上載失敗：' + upErr.message);
             await sb.storage.from(BUCKET).remove([rf.path]);
-            size = c.size; mime = 'image/jpeg'; moved = true;
+            size = cimg.size; mime = 'image/jpeg'; moved = true;
           }
         }
       }
@@ -935,20 +974,39 @@ async function save(){
       }
       rf.consumed = true;
       Object.assign(row, { file_path: finalPath, file_name: rf.name, file_size: size, file_mime: mime });
-    } else if (draft.file) {
+      const data = await submitEntry({ id: row.id, row });
+      items.unshift(data);
+      resetDraft(); toast(`已儲存到「${CAT[c].name}」`); renderView();
+      return;
+    }
+
+    const entry = { id: row.id, row, created: Date.now() };
+    if (draft.file) {
       const f = k === 'image' ? await compressImage(draft.file) : draft.file;
       const ext = ((f.name.split('.').pop() || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8)) || 'bin';
-      const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
-      const { error: upErr } = await sb.storage.from(BUCKET).upload(path, f, { contentType: f.type || 'application/octet-stream' });
-      if (upErr) throw new Error('上載失敗：' + upErr.message);
-      Object.assign(row, { file_path: path, file_name: draft.file.name, file_size: f.size, file_mime: f.type || null });
+      entry.path = `${user.id}/${crypto.randomUUID()}.${ext}`;
+      entry.blob = f; entry.mime = f.type || 'application/octet-stream';
+      Object.assign(row, { file_path: entry.path, file_name: draft.file.name, file_size: f.size, file_mime: f.type || null });
     }
-    const { data, error } = await sb.from('items').insert(row).select().single();
-    if (error) throw new Error('儲存失敗：' + error.message);
-    items.unshift(data);
-    resetDraft();
-    toast(`已儲存到「${CAT[c].name}」`);
-    renderView();
+
+    let data = null, queued = false;
+    if (navigator.onLine) {
+      try { data = await submitEntry(entry); }
+      catch (e) { if (!isNetErr(e)) throw e; queued = true; }
+    } else queued = true;
+
+    if (queued) {
+      await queuePut(entry);
+      items.unshift(localItemFrom(entry));
+      resetDraft();
+      toast(`網絡不穩，已先存在手機，連線後會自動上載`);
+      scheduleFlush();
+    } else {
+      items.unshift(data);
+      resetDraft();
+      toast(`已儲存到「${CAT[c].name}」`);
+    }
+    renderView(); updateNetBar();
   } catch (e) {
     toast(e.message || '儲存失敗，請再試一次', true);
   } finally {
@@ -956,6 +1014,112 @@ async function save(){
     const b = $('#saveBtn'); if (b && draft.cat) b.textContent = `儲存到「${CAT[draft.cat].name}」`;
   }
 }
+
+/* ============ 離線暫存：先存手機，有網自動上載 ============ */
+class NetErr extends Error { constructor(m){ super(m || '網絡逾時'); this.name = 'NetErr'; } }
+const isNetErr = e => !navigator.onLine || e?.name === 'NetErr' || /fetch|network|load failed|timed? ?out|connection|offline|網絡/i.test(e?.message || '');
+const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new NetErr()), ms))]);
+const pending = new Map();   // id -> 本機暫存項目
+
+let idbP = null;
+function idb(){
+  if (idbP) return idbP;
+  idbP = new Promise((res, rej) => {
+    const r = indexedDB.open('inbox-offline', 1);
+    r.onupgradeneeded = () => { r.result.createObjectStore('queue', { keyPath: 'id' }); r.result.createObjectStore('cache'); };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+  return idbP;
+}
+async function idbDo(store, mode, fn){
+  const db = await idb();
+  return new Promise((res, rej) => {
+    const tx = db.transaction(store, mode), st = tx.objectStore(store);
+    const req = fn(st);
+    tx.oncomplete = () => res(req?.result);
+    tx.onerror = () => rej(tx.error);
+  });
+}
+const queuePut = e => idbDo('queue', 'readwrite', st => st.put(e));
+const queueDel = id => idbDo('queue', 'readwrite', st => st.delete(id));
+const queueAll = () => idbDo('queue', 'readonly', st => st.getAll()).then(a => (a || []).sort((x, y) => x.created - y.created));
+const cacheSet = (k, v) => idbDo('cache', 'readwrite', st => st.put(v, k)).catch(() => {});
+const cacheGet = k => idbDo('cache', 'readonly', st => st.get(k)).catch(() => null);
+
+function localItemFrom(entry){
+  const it = { ...entry.row, _pending: true };
+  if (entry.blob && entry.row.kind === 'image') it._localURL = URL.createObjectURL(entry.blob);
+  pending.set(entry.id, it);
+  return it;
+}
+async function submitEntry(entry){
+  if (entry.blob) {
+    const { error } = await withTimeout(sb.storage.from(BUCKET).upload(entry.path, entry.blob, { contentType: entry.mime, upsert: true }), 90000);
+    if (error) throw new Error('上載失敗：' + error.message);
+  }
+  const { error } = await withTimeout(sb.from('items').upsert(entry.row, { onConflict: 'id', ignoreDuplicates: true }), 12000);
+  if (error) throw new Error('儲存失敗：' + error.message);
+  const { data, error: e2 } = await withTimeout(sb.from('items').select('*').eq('id', entry.id).single(), 20000);
+  if (e2) throw new Error('儲存失敗：' + e2.message);
+  return data;
+}
+let flushing = false, flushTimer = null;
+function scheduleFlush(){ clearTimeout(flushTimer); if (pending.size) flushTimer = setTimeout(flushQueue, 30000); }
+async function flushQueue(manual){
+  if (flushing || !pending.size) return;
+  if (!navigator.onLine) { if (manual) toast('仍然離線，連線後會自動上載', true); return; }
+  flushing = true; updateNetBar();
+  let ok = 0, failed = false;
+  try {
+    let session = null;
+    try { session = (await withTimeout(sb.auth.getSession(), 15000)).data.session; } catch {}
+    if (!session) { const r = await withTimeout(sb.auth.refreshSession(), 15000).catch(() => ({ data: {} })); session = r.data?.session; }
+    if (!session) { failed = true; return; }
+    if (!user) user = session.user;
+    for (const entry of await queueAll()) {
+      try {
+        const data = await submitEntry(entry);
+        await queueDel(entry.id);
+        const local = pending.get(entry.id);
+        if (local?._localURL) URL.revokeObjectURL(local._localURL);
+        pending.delete(entry.id);
+        const idx = items.findIndex(i => i.id === entry.id);
+        if (idx >= 0) items[idx] = data; else items.unshift(data);
+        ok++;
+      } catch (e) {
+        failed = true;
+        if (!isNetErr(e)) toast(e.message, true);
+        break;
+      }
+    }
+  } finally {
+    flushing = false;
+    if (ok) { toast(`已上載 ${ok} 個暫存項目`); cacheItems(); }
+    renderView(); updateNetBar();
+    if (failed) scheduleFlush();
+  }
+}
+async function loadPending(){
+  try { for (const e of await queueAll()) if (!pending.has(e.id)) localItemFrom(e); } catch {}
+}
+function mergePending(list){
+  const ids = new Set(list.map(i => i.id));
+  return [...[...pending.values()].filter(p => !ids.has(p.id)), ...list];
+}
+function cacheItems(){ cacheSet('items', items.filter(i => !i._pending)); }
+function updateNetBar(){
+  const bar = $('#netBar'); if (!bar) return;
+  const off = !navigator.onLine, n = pending.size;
+  if (!off && !n) { bar.hidden = true; return; }
+  bar.hidden = false;
+  bar.classList.toggle('off', off);
+  bar.innerHTML = `<span>${off ? '離線中' : flushing ? '上載中…' : '網絡不穩'}${n ? `・${n} 項等待上載` : '・新增的項目會先存在手機'}</span>
+    ${n && !off && !flushing ? '<button type="button" class="ghost-btn sm" data-act="flushNow">立即上載</button>' : ''}`;
+}
+window.addEventListener('online', () => { updateNetBar(); flushQueue(); loadItems().then(renderView); });
+window.addEventListener('offline', updateNetBar);
+
 function resetDraft(){
   revokePreview();
   titleReq++;
@@ -1082,11 +1246,12 @@ function itemHTML(it, forceCat){
     else body += `<div class="tap-area" data-act="ef" data-f="content">${clampBlock(it.content || '', it.category === 'essay' ? 'essay' : '')}</div>`;
   } else if (it.kind === 'image') {
     if (it.title && it.category !== 'essay') body += `<div class="i-title tap-area" data-act="ef" data-f="title">${esc(it.title)}</div>`;
-    body += `<img class="i-img" data-path="${esc(it.file_path)}" alt="${esc(it.title || '圖片')}" loading="lazy">`;
+    body += it._localURL ? `<img class="i-img" src="${it._localURL}" alt="${esc(it.title || '圖片')}">`
+      : `<img class="i-img" data-path="${esc(it.file_path)}" alt="${esc(it.title || '圖片')}" loading="lazy">`;
     if (it.content) body += `<div class="tap-area" data-act="ef" data-f="content">${clampBlock(it.content)}</div>`;
   } else if (it.kind === 'file') {
     body += `<div class="file-row"><span class="file-ico">📄</span><div style="flex:1;min-width:0"><div class="i-title tap-area" data-act="ef" data-f="title">${esc(it.title || it.file_name)}</div>
-      <div class="i-url">${fmtSize(it.file_size || 0)}</div></div><button type="button" class="ghost-btn sm" data-act="download">下載</button></div>`;
+      <div class="i-url">${fmtSize(it.file_size || 0)}</div></div>${it._pending ? '' : '<button type="button" class="ghost-btn sm" data-act="download">下載</button>'}</div>`;
     if (it.content) body += `<div class="tap-area" data-act="ef" data-f="content">${clampBlock(it.content)}</div>`;
   }
 
@@ -1102,6 +1267,7 @@ function itemHTML(it, forceCat){
     badges.push(it.shop ? tap('shop', `<span class="badge">🛒 ${esc(it.shop)}</span>`) : add('shop', '在哪裏買'));
     badges.push(it.price ? tap('price', `<span class="badge">$${esc(String(it.price).replace(/^\$/, ''))}</span>`) : add('price', '價錢'));
   }
+  if (it._pending) badges.push(`<span class="badge pend">⏳ 未同步</span>`);
   badges.push(it.category === 'essay' ? tap('entry_date', `<span>${fmtDay(it.entry_date || ymd(new Date(it.created_at)))}</span>`) : `<span>${fmtDate(it.created_at)}</span>`);
 
   const note = it.note ? `<div class="i-note tap-area" data-act="ef" data-f="note">${linkify(it.note)}</div>` : '';
@@ -1147,6 +1313,13 @@ async function updateItem(id, patch){
 async function deleteItem(id){
   const it = findItem(id); if (!it) return;
   if (!confirm('刪除這個項目？刪除後無法復原。')) return;
+  if (pending.has(id)) {
+    await queueDel(id);
+    if (it._localURL) URL.revokeObjectURL(it._localURL);
+    pending.delete(id);
+    items = items.filter(i => i.id !== id); closeSheet(); renderView(); updateNetBar(); toast('已刪除');
+    return;
+  }
   if (it.file_path) await sb.storage.from(BUCKET).remove([it.file_path]);
   const { error } = await sb.from('items').delete().eq('id', id);
   if (error) { toast('刪除失敗：' + error.message, true); return; }
@@ -1175,6 +1348,12 @@ $('#layer').addEventListener('change', e => { if (e.target.dataset.e === 'catego
 
 function openMenu(id){
   const it = findItem(id); if (!it) return;
+  if (pending.has(id)) {
+    openSheet(`<div class="sheet-title">${esc(summaryOf(it))}</div><p class="hint">這個項目暫存在手機，連線後會自動上載。上載後先可以修改。</p>
+      <div class="menu"><button type="button" data-act="delete" data-id="${id}" class="danger">刪除</button></div>
+      <button type="button" class="ghost-btn full" data-act="close">取消</button>`);
+    return;
+  }
   openSheet(`<div class="sheet-title">${esc(summaryOf(it))}</div><div class="menu">
     <button type="button" data-act="edit" data-id="${id}">編輯</button>
     <button type="button" data-act="moveMenu" data-id="${id}">轉分類</button>
@@ -1323,9 +1502,15 @@ async function saveFieldEdit(picked){
 
 /* ============ 分類設定（同步到 Supabase） ============ */
 async function loadSettings(){
-  const { data, error } = await sb.from('settings').select('data').eq('user_id', user.id).maybeSingle();
-  if (error || !data || !data.data) return;
-  const d = data.data;
+  let d = null;
+  if (navigator.onLine) try {
+    const { data, error } = await withTimeout(sb.from('settings').select('data').eq('user_id', user.id).maybeSingle(), 10000);
+    if (!error && data?.data) { d = data.data; try { localStorage.setItem('settingsCache', JSON.stringify(d)); } catch {} }
+  } catch {}
+  if (!d) { try { d = JSON.parse(localStorage.getItem('settingsCache') || 'null'); } catch {} }
+  if (d) applySettings(d);
+}
+function applySettings(d){
   if (Array.isArray(d.cats) && d.cats.length) { CATS = d.cats; rebuildCats(); }
   if (Array.isArray(d.shops)) SHOPS = d.shops;
   renderShopList();
@@ -1334,6 +1519,7 @@ async function loadSettings(){
 async function saveSettings(){
   const { error } = await sb.from('settings').upsert({ user_id: user.id, data: { cats: CATS, priority: PRIORITY, shops: SHOPS }, updated_at: new Date().toISOString() });
   if (error) { toast('設定儲存失敗：請先在 Supabase 執行 settings.sql', true); return false; }
+  try { localStorage.setItem('settingsCache', JSON.stringify({ cats: CATS, priority: PRIORITY, shops: SHOPS })); } catch {}
   return true;
 }
 let mgr = null;
@@ -1482,6 +1668,8 @@ document.addEventListener('click', async e => {
   if (t.closest('a')) return;
   const a = t.closest('[data-act]'); if (!a) return;
   const id = a.dataset.id || a.closest('[data-id]')?.dataset.id;
+  if (id && pending.has(id) && !['expand', 'menu', 'delete', 'close'].includes(a.dataset.act)) { toast('這個項目未同步，上載後先可以修改'); return; }
+  if (a.dataset.act === 'flushNow') { flushQueue(true); return; }
   switch (a.dataset.act) {
     case 'more': ui.showMore = true; renderDraftExtra(); break;
     case 'note': draft.showNote = true; renderDraftExtra(); $('#draftExtra [data-f="note"]')?.focus(); break;
@@ -1535,6 +1723,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { if (!lb.hidden) { lb.hidden = true; return; } closeSheet(); }
 });
 
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 boot().catch(err => { console.error(err); $('#errorMsg').textContent = err.message || String(err); showScreen('error'); });
 </script>
 </body>
