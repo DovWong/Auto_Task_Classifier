@@ -62,6 +62,10 @@ a{color:var(--accent)}
 @media (min-width:960px){
   .app{display:grid;grid-template-columns:400px minmax(0,1fr);gap:32px;padding-bottom:48px}
   .pane{display:block}
+  .pane-view,.pane-sched{grid-column:2;grid-row:1}
+  body.right-sched .pane-view{display:none}
+  body:not(.right-sched) .pane-sched{display:none}
+  .right-switch{display:flex!important}
   .pane-input{position:sticky;top:12px;align-self:start;max-height:calc(100vh - 90px);overflow:auto;padding-bottom:12px}
   .tabbar{display:none!important}
 }
@@ -141,6 +145,34 @@ textarea.input{resize:vertical}
 .view-sub{font-size:14px;color:var(--ink-2);margin:2px 0 6px}
 .view-filter{margin:8px 0 4px}
 
+.sch-add{margin:4px 0 8px}
+.seg-date{position:relative;padding:7px 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface);font-size:14px;cursor:pointer;overflow:hidden}
+.seg-date input{position:absolute;inset:0;opacity:0;width:100%;cursor:pointer}
+.sch-day{margin-top:18px;border:1.5px solid var(--line);border-radius:14px;padding:10px 12px;background:var(--surface)}
+.sch-day.past{opacity:.7}
+.sch-day.past summary{list-style:none;cursor:pointer}
+.sch-day.past summary::-webkit-details-marker{display:none}
+.sch-day-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.sch-day-head h3{font-family:var(--display);font-size:20px;margin:0;flex:1;min-width:0}
+.sch-status{font-size:13px;color:var(--accent)}
+.sch-list{min-height:8px;margin-top:6px}
+.sch-empty{padding:4px 2px 6px}
+.sch-item{display:flex;align-items:center;gap:8px;padding:9px 2px;border-top:1px solid var(--line);background:var(--surface)}
+.sch-item:first-child{border-top:0}
+.sch-item.dragging{opacity:.6;background:var(--surface-2);border-radius:10px}
+.sch-item.done .sch-title{opacity:.5;text-decoration:line-through}
+.sch-item.is-late{box-shadow:inset 3px 0 0 var(--star);padding-left:8px}
+.sch-body{flex:1;min-width:0}
+.sch-title{word-break:break-word}
+.sch-title a{color:var(--ink);text-decoration:none}
+.badge.late{background:var(--star);color:#1C1C1C;border-color:transparent}
+.mini-ico{border:0;background:transparent;width:32px;height:32px;border-radius:8px;padding:0;color:var(--ink-2);font-size:15px;flex:none}
+.mini-ico:hover{background:var(--surface-2)}
+.pk-list{margin-top:6px;max-height:46vh;overflow:auto;border-top:1px solid var(--line)}
+.pk-row{display:flex;gap:10px;align-items:flex-start;padding:10px 2px;border-bottom:1px solid var(--line);cursor:pointer}
+.pk-row input{width:20px;height:20px;margin-top:2px;accent-color:var(--accent);flex:none}
+.pk-text{flex:1;min-width:0;word-break:break-word}
+.pk-text .i-meta{margin-top:4px}
 .net-bar{max-width:1200px;margin:0 auto 8px;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:14px;background:var(--surface-2);border-top:1px solid var(--line);border-bottom:1px solid var(--line);color:var(--ink-2)}
 .net-bar.off{color:var(--star)}
 .badge.pend{color:var(--star);border-color:var(--star)}
@@ -187,7 +219,8 @@ a.i-url:hover{color:var(--accent);text-decoration:underline}
 .empty{padding:40px 8px;text-align:center;color:var(--ink-2)}
 
 /* ---------- tabbar ---------- */
-.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:30;display:grid;grid-template-columns:1fr 1fr;background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+.right-switch{display:none;margin-bottom:12px}
+.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:30;display:grid;grid-template-columns:1fr 1fr 1fr;background:var(--surface);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
 .tabbar button{border:0;background:none;color:var(--ink-2);display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 0 9px;font-size:13px}
 .tabbar button svg{width:24px;height:24px}
 .tabbar button.on{color:var(--accent);font-weight:600}
@@ -313,10 +346,18 @@ input[type=range]{width:100%;accent-color:var(--accent)}
     </section>
 
     <section class="pane pane-view" id="paneView">
+      <div class="right-switch seg"><button type="button" data-tab="view">查看</button><button type="button" data-tab="sched">時間表</button></div>
       <input id="searchInput" class="input search" type="search" placeholder="搜尋全部" autocomplete="off">
       <div class="cat-bar" id="catBar"></div>
       <div id="viewHead"></div>
       <div id="viewList"></div>
+    </section>
+
+    <section class="pane pane-sched" id="paneSched">
+      <div class="right-switch seg"><button type="button" data-tab="view">查看</button><button type="button" data-tab="sched">時間表</button></div>
+      <div class="view-headrow"><h2 class="view-title" style="--c:var(--accent)">時間表</h2></div>
+      <div class="sch-add" id="schAdd"></div>
+      <div id="schDays"></div>
     </section>
   </main>
 
@@ -326,6 +367,9 @@ input[type=range]{width:100%;accent-color:var(--accent)}
     </button>
     <button data-tab="view">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r=".8" fill="currentColor"/><circle cx="4" cy="12" r=".8" fill="currentColor"/><circle cx="4" cy="18" r=".8" fill="currentColor"/></svg>查看
+    </button>
+    <button data-tab="sched">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>時間表
     </button>
   </nav>
 </div>
@@ -338,7 +382,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 /* ============ 設定 ============
    直接在這裏填入，就不用每部裝置各自輸入一次。
    anon key 是公開用的，資料靠 Supabase 的權限規則保護。 */
-const APP_VERSION = 'v1.9.1';
+const APP_VERSION = 'v2.0';
 const SUPABASE_URL = 'https://evbzbvvyqaxakbeslqgn.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_LKT5CR-u3eWAkRQ-wmp_0g_yEmwFmf6';
 
@@ -374,6 +418,7 @@ const DEFAULT_PRIORITY = {
 };
 let PRIORITY = JSON.parse(JSON.stringify(DEFAULT_PRIORITY));
 let SHOPS = ['淘寶'];
+let SCHED_DAYS = [], settingsLoaded = false;   // 自己加入的日子（就算未有事項都會顯示）
 const DONE_DAYS = 7;
 const BUCKET = 'captures';
 const CHECK_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -481,7 +526,7 @@ function summaryOf(it){
 
 /* ============ state ============ */
 let sb = null, user = null, items = [], signed = {}, saving = false, editState = null, lastRandom = null;
-const ui = { tab:'input', viewCat: localStorage.getItem('lastCat') || 'all', search:'', workFilter:'all', shopFilter:'all', scope: localStorage.getItem('scope') || 'all', showMore:false };
+const ui = { tab:'input', viewCat: localStorage.getItem('lastCat') || 'all', search:'', workFilter:'all', shopFilter:'all', right: (() => { try { return localStorage.getItem('rightTab') || 'view'; } catch { return 'view'; } })(), scope: localStorage.getItem('scope') || 'all', showMore:false };
 // 收藏：項目自己設定優先，否則跟分類的預設
 const isPinned = i => !!i.pinned_at;
 const isKeep = i => i.keep != null ? !!i.keep : !!CAT[i.category]?.keep;
@@ -571,12 +616,18 @@ async function startApp(){
   updateNetBar();
   flushQueue();
   if (navigator.onLine) { cleanupDone().catch(() => {}); cleanupTmp().catch(() => {}); }
+  await loadSched();
+  setTab(ui.tab);
+  renderView();
   sb.channel('items-sync')
     .on('postgres_changes', { event:'*', schema:'public', table:'items' }, () => {
       clearTimeout(rtTimer); rtTimer = setTimeout(async () => { await loadItems(); renderView(); }, 500);
+    })
+    .on('postgres_changes', { event:'*', schema:'public', table:'schedule' }, () => {
+      clearTimeout(schTimer); schTimer = setTimeout(async () => { if (!schDrag) { await loadSched(); renderSched(); } }, 500);
     }).subscribe();
   document.addEventListener('visibilitychange', async () => {
-    if (document.visibilityState === 'visible') { updateNetBar(); flushQueue(); await loadItems(); renderView(); }
+    if (document.visibilityState === 'visible') { updateNetBar(); flushQueue(); await loadItems(); await loadSched(); renderView(); }
   });
 }
 async function loadItems(){
@@ -657,9 +708,14 @@ function readParams(){
 /* ============ tabs ============ */
 function setTab(t){
   ui.tab = t;
+  if (t === 'view' || t === 'sched') { ui.right = t; try { localStorage.setItem('rightTab', t); } catch {} }
+  document.body.classList.toggle('right-sched', ui.right === 'sched');
   $('#paneInput').classList.toggle('active', t === 'input');
   $('#paneView').classList.toggle('active', t === 'view');
-  document.querySelectorAll('.tabbar [data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+  $('#paneSched').classList.toggle('active', t === 'sched');
+  document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === t || (b.closest('.right-switch') && b.dataset.tab === ui.right)));
+  if (t === 'sched') renderSched();
+  fixClamps();
   window.scrollTo(0, 0);
 }
 
@@ -1198,6 +1254,7 @@ function renderView(){
   $('#viewList').innerHTML = vis.length ? vis.map(i => itemHTML(i)).join('')
     : `<div class="empty">${q ? '找不到符合的項目。' : '這裏還沒有項目。到「輸入」加第一個。'}</div>`;
   renderSideTodo();
+  renderSched();
   fixClamps();
   fillImages();
 }
@@ -1231,6 +1288,7 @@ function fixClamps(root = document){
   root.querySelectorAll('.i-text.clamp').forEach(el => {
     const btn = el.nextElementSibling;
     if (!btn || !btn.classList.contains('expand')) return;
+    if (!el.offsetParent) return;   // 未顯示的分頁量度不到，等切換時再判斷
     if (el.scrollHeight > el.clientHeight + 2) btn.hidden = false;
     else { el.classList.remove('clamp'); btn.remove(); }
   });
@@ -1468,6 +1526,241 @@ function openScope(){
     <button type="button" class="ghost-btn full" data-act="close">關閉</button>`);
 }
 
+/* ============ 時間表 ============ */
+let sched = [], schedOK = true, schTimer = null, schDrag = null, rolling = false;
+const WD = '日一二三四五六';
+const dayLabel = d => {
+  const t = todayStr(), diff = dayDiff(t, d), [y, m, dd] = d.split('-').map(Number);
+  const wd = WD[new Date(y, m - 1, dd).getDay()];
+  const pre = diff === 0 ? '今日' : diff === 1 ? '明日' : diff === -1 ? '昨日' : '';
+  return `${pre ? pre + ' · ' : ''}${fmtDay(d)}（${wd}）`;
+};
+async function loadSched(){
+  if (!navigator.onLine) { sched = (await cacheGet('sched')) || sched; return; }
+  try {
+    const { data, error } = await withTimeout(sb.from('schedule').select('*'), 15000);
+    if (error) { schedOK = !/schedule/.test(error.message); if (!isNetErr(error)) console.warn(error); sched = (await cacheGet('sched')) || sched; return; }
+    schedOK = true; sched = data || []; cacheSet('sched', sched);
+    rollover();
+  } catch { sched = (await cacheGet('sched')) || sched; }
+}
+const schOnline = () => { if (!navigator.onLine) { toast('時間表要連線先可以修改', true); return false; } if (!schedOK) { toast('請先在 Supabase 執行 schedule.sql', true); return false; } return true; };
+// 過咗日仍未完成的事項，自動搬去今日最頂，並記住原本的日子
+async function rollover(){
+  if (rolling || !navigator.onLine) return;
+  const t = todayStr();
+  const late = sched.filter(e => e.day < t && findItem(e.item_id) && !findItem(e.item_id).done_at);
+  if (!late.length) return;
+  rolling = true;
+  try {
+    const minPos = Math.min(0, ...sched.filter(e => e.day === t).map(e => e.pos));
+    const rows = late.map((e, i) => ({ ...e, orig_day: e.orig_day || e.day, day: t, pos: minPos - late.length + i }));
+    const { error } = await sb.from('schedule').upsert(rows);
+    if (!error) { rows.forEach(r => { const k = sched.findIndex(e => e.id === r.id); if (k >= 0) sched[k] = r; }); renderSched(); }
+  } finally { rolling = false; }
+}
+function schDays(){
+  const t = todayStr();
+  const set = new Set([t, ...SCHED_DAYS.filter(d => d >= t), ...sched.map(e => e.day)]);
+  return [...set].sort();
+}
+function renderSched(){
+  const box = $('#schDays'); if (!box) return;
+  if (!schedOK) { box.innerHTML = '<div class="empty">請先在 Supabase 執行 schedule.sql，時間表先可以使用。</div>'; $('#schAdd').innerHTML = ''; return; }
+  const t = todayStr();
+  const days = schDays();
+  const tm = addDays(t, 1);
+  $('#schAdd').innerHTML = `<div class="seg">
+    ${days.includes(tm) ? '' : '<button type="button" data-act="schAddDay" data-d="tomorrow">＋ 明日</button>'}
+    <label class="seg-date">＋ 揀日子<input type="date" id="schDayPick" min="${t}"></label></div>`;
+  const future = days.filter(d => d >= t), past = days.filter(d => d < t).reverse();
+  const entryHTML = e => {
+    const it = findItem(e.item_id); if (!it) return '';
+    const cat = CAT[it.category] || { name: it.category, c: '#888' }, done = !!it.done_at;
+    const text = esc(summaryOf(it));
+    const main = it.kind === 'link' ? `<a href="${esc(it.content)}" target="_blank" rel="noopener">${text}</a>` : text;
+    const late = e.orig_day && e.orig_day < e.day ? `<span class="badge late">${dayDiff(e.orig_day, e.day) === 1 ? '昨日' : fmtDay(e.orig_day)}未完成</span>` : '';
+    const due = it.category === 'todo' && it.due_date && !done ? dueBadge(it.due_date) : '';
+    return `<div class="sch-item ${done ? 'done' : ''} ${late ? 'is-late' : ''}" data-sid="${e.id}" data-id="${it.id}">
+      <span class="handle" aria-label="按住拖動">⠿</span>
+      <button type="button" class="check ${done ? 'on' : ''}" data-act="schToggle" aria-label="${done ? '取消完成' : '標記完成'}">${done ? CHECK_SVG : ''}</button>
+      <div class="sch-body"><div class="sch-title">${main}</div>
+        <div class="i-meta"><span class="badge cat" style="--c:${cat.c}">${esc(cat.name)}</span>${late}${due}</div></div>
+      <button type="button" class="mini-ico" data-act="schMove" aria-label="搬去另一日" title="搬去另一日">📅</button>
+      <button type="button" class="mini-ico" data-act="schRemove" aria-label="從時間表移走" title="從時間表移走（項目會保留）">✕</button>
+    </div>`;
+  };
+  const dayHTML = (d, isPast) => {
+    const list = sched.filter(e => e.day === d && findItem(e.item_id)).sort((a, b) => a.pos - b.pos);
+    const doneN = list.filter(e => findItem(e.item_id).done_at).length;
+    const left = DONE_DAYS - dayDiff(d, t) + 1;
+    const head = `<div class="sch-day-head"><h3>${dayLabel(d)}</h3>
+      ${isPast ? `<span class="sch-status">✓ 已完成${left > 0 ? `・${left} 天後刪除` : ''}</span>`
+        : `<span class="view-count">${list.length ? `${doneN}/${list.length}` : ''}</span>
+          <button type="button" class="ghost-btn sm" data-act="schPick" data-d="${d}">＋ 加入</button>
+          ${!list.length && d !== t ? `<button type="button" class="mini-ico" data-act="schDelDay" data-d="${d}" aria-label="移除這一日">✕</button>` : ''}`}</div>`;
+    const body = `<div class="sch-list" data-day="${d}">${list.map(entryHTML).join('')}</div>
+      ${!list.length && !isPast ? '<div class="hint sch-empty">撳「＋ 加入」由已儲存的項目揀，或者直接打新事項。</div>' : ''}`;
+    return isPast ? `<details class="sch-day past"><summary>${head}</summary>${body}</details>` : `<div class="sch-day">${head}${body}</div>`;
+  };
+  box.innerHTML = future.map(d => dayHTML(d, false)).join('') + (past.length ? `<div class="section-label">已完成的日子</div>` + past.map(d => dayHTML(d, true)).join('') : '');
+  cleanupSched();
+  rollover();
+}
+// 已完成的日子：過咗 7 日就移走
+let schCleaning = false;
+async function cleanupSched(){
+  if (schCleaning || !navigator.onLine || !schedOK || !settingsLoaded) return;
+  const t = todayStr();
+  const old = sched.filter(e => e.day < t && dayDiff(e.day, t) > DONE_DAYS);
+  const oldDays = SCHED_DAYS.filter(d => d < t);
+  if (!old.length && !oldDays.length) return;
+  schCleaning = true;
+  try {
+    if (old.length) { const { error } = await sb.from('schedule').delete().in('id', old.map(e => e.id)); if (!error) sched = sched.filter(e => !old.includes(e)); }
+    if (oldDays.length) { SCHED_DAYS = SCHED_DAYS.filter(d => d >= t); await saveSettings(); }
+  } finally { schCleaning = false; }
+}
+$('#schAdd').addEventListener('change', async e => {
+  if (e.target.id !== 'schDayPick' || !e.target.value) return;
+  await addSchedDay(e.target.value);
+});
+async function addSchedDay(d){
+  if (!d) return;
+  if (!SCHED_DAYS.includes(d)) { SCHED_DAYS.push(d); SCHED_DAYS.sort(); await saveSettings(); }
+  renderSched();
+  document.querySelector(`.sch-list[data-day="${d}"]`)?.closest('.sch-day')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+let pk = null;
+function openPicker(day){
+  if (!schOnline()) return;
+  pk = { day, cat: 'all', q: '', sel: new Set() };
+  renderPicker();
+}
+function renderPicker(){
+  const q = pk.q.trim().toLowerCase();
+  const onDay = new Set(sched.filter(e => e.day === pk.day).map(e => e.item_id));
+  const other = Object.fromEntries(sched.filter(e => e.day !== pk.day).map(e => [e.item_id, e.day]));
+  let list = items.filter(i => !i.done_at && !i._pending && !onDay.has(i.id));
+  if (pk.cat !== 'all') list = list.filter(i => i.category === pk.cat);
+  if (q) list = list.filter(i => [i.title, i.content, i.note, i.file_name, i.shop].some(v => v && v.toLowerCase().includes(q)));
+  list = sortItems(list, pk.cat === 'todo').slice(0, 150);
+  const chip = (id, name, c) => `<button type="button" class="cat-chip ${pk.cat === id ? 'selected' : ''}" style="--c:${c}" data-act="pkCat" data-cat="${id}">${esc(name)}</button>`;
+  openSheet(`<h3>加入 ${dayLabel(pk.day)}</h3>
+    <div class="mgr-row"><input class="input" id="pkNew" placeholder="直接打新事項（會存入 To do）"><button type="button" class="ghost-btn" data-act="pkNew">加入</button></div>
+    <input class="input" id="pkSearch" type="search" placeholder="搜尋已儲存的項目" value="${esc(pk.q)}" style="margin-top:12px">
+    <div class="cat-bar" style="margin-top:8px">${chip('all', '全部', 'var(--ink-2)')}${CATS.map(c => chip(c.id, c.name, c.c)).join('')}</div>
+    <div class="pk-list">${list.length ? list.map(i => {
+      const cat = CAT[i.category] || { name: i.category, c: '#888' };
+      return `<label class="pk-row"><input type="checkbox" data-pk="${i.id}" ${pk.sel.has(i.id) ? 'checked' : ''}>
+        <span class="pk-text">${esc(summaryOf(i))}<span class="i-meta"><span class="badge cat" style="--c:${cat.c}">${esc(cat.name)}</span>${other[i.id] ? `<span class="badge">已排 ${fmtDay(other[i.id])}，會搬過嚟</span>` : ''}</span></span></label>`;
+    }).join('') : '<div class="hint" style="padding:16px 2px">冇符合的項目。</div>'}</div>
+    <div class="sheet-foot"><button type="button" class="ghost-btn" data-act="close">取消</button>
+      <button type="button" class="btn-primary inline" data-act="pkAdd" ${pk.sel.size ? '' : 'disabled'}>加入 ${pk.sel.size || ''} 項</button></div>`);
+}
+async function pickerAdd(ids){
+  if (!schOnline() || !ids.length) return;
+  const d = pk.day;
+  let pos = Math.max(0, ...sched.filter(e => e.day === d).map(e => e.pos)) + 1;
+  const rows = ids.map(id => {
+    const ex = sched.find(e => e.item_id === id);
+    return ex ? { ...ex, day: d, orig_day: null, pos: pos++ } : { id: crypto.randomUUID(), item_id: id, day: d, pos: pos++ };
+  });
+  const { data, error } = await sb.from('schedule').upsert(rows).select();
+  if (error) { toast('加入失敗：' + error.message, true); return; }
+  for (const r of data) { const k = sched.findIndex(e => e.id === r.id); if (k >= 0) sched[k] = r; else sched.push(r); }
+  if (!SCHED_DAYS.includes(d) && d >= todayStr()) { SCHED_DAYS.push(d); SCHED_DAYS.sort(); saveSettings(); }
+  pk = null; closeSheet(); renderSched(); toast(`已加入 ${rows.length} 項`);
+}
+async function pickerNew(){
+  const text = ($('#pkNew')?.value || '').trim();
+  if (!text) { toast('請輸入事項', true); return; }
+  if (!schOnline()) return;
+  const cat = CAT.todo ? 'todo' : CATS[0].id;
+  const { data, error } = await sb.from('items').insert({ id: crypto.randomUUID(), category: cat, kind: 'text', content: text }).select().single();
+  if (error) { toast('新增失敗：' + error.message, true); return; }
+  items.unshift(data);
+  await pickerAdd([data.id]);
+  renderView();
+}
+function openSchMove(sid){
+  if (!schOnline()) return;
+  const e = sched.find(x => x.id === sid); if (!e) return;
+  const t = todayStr();
+  const opts = [...new Set([t, addDays(t, 1), ...schDays().filter(d => d >= t)])].sort().filter(d => d !== e.day);
+  openSheet(`<h3>搬去哪一日？</h3><div class="sheet-title">${esc(summaryOf(findItem(e.item_id) || {}))}</div>
+    <div class="scope-menu">${opts.map(d => `<button type="button" data-act="schMoveTo" data-sid="${sid}" data-d="${d}"><span>${dayLabel(d)}</span></button>`).join('')}</div>
+    <div class="field"><label>或者揀日子</label><input type="date" class="input" id="schMovePick" data-sid="${sid}" min="${t}"></div>
+    <button type="button" class="ghost-btn full" data-act="close">取消</button>`);
+}
+$('#layer').addEventListener('change', e => { if (e.target.id === 'schMovePick' && e.target.value) schMoveTo(e.target.dataset.sid, e.target.value); });
+async function schMoveTo(sid, d){
+  const e = sched.find(x => x.id === sid); if (!e || !schOnline()) return;
+  const pos = Math.max(0, ...sched.filter(x => x.day === d).map(x => x.pos)) + 1;
+  const row = { ...e, day: d, orig_day: null, pos };
+  const { error } = await sb.from('schedule').upsert(row);
+  if (error) { toast('搬動失敗：' + error.message, true); return; }
+  Object.assign(e, row);
+  if (!SCHED_DAYS.includes(d)) { SCHED_DAYS.push(d); SCHED_DAYS.sort(); saveSettings(); }
+  closeSheet(); renderSched(); toast(`已搬去 ${dayLabel(d)}`);
+}
+async function schRemove(sid){
+  if (!schOnline()) return;
+  const e = sched.find(x => x.id === sid); if (!e) return;
+  sched = sched.filter(x => x !== e); renderSched();
+  const { error } = await sb.from('schedule').delete().eq('id', sid);
+  if (error) { sched.push(e); renderSched(); toast('移走失敗：' + error.message, true); return; }
+  toast('已從時間表移走，項目仍然保留');
+}
+async function schDelDay(d){
+  SCHED_DAYS = SCHED_DAYS.filter(x => x !== d);
+  await saveSettings(); renderSched();
+}
+// 拖動：同一日上下調位，亦可以拖去另一日
+const schPane = $('#paneSched');
+schPane.addEventListener('pointerdown', e => {
+  const h = e.target.closest('.sch-item .handle'); if (!h) return;
+  if (!schOnline()) return;
+  e.preventDefault();
+  const el = h.closest('.sch-item');
+  schDrag = { el, id: e.pointerId, from: el.parentElement.dataset.day, y: e.clientY };
+  el.classList.add('dragging');
+  h.setPointerCapture(e.pointerId);
+});
+schPane.addEventListener('pointermove', e => {
+  if (!schDrag || e.pointerId !== schDrag.id) return;
+  schDrag.y = e.clientY;
+  if (e.clientY < 70) window.scrollBy(0, -12); else if (e.clientY > innerHeight - 90) window.scrollBy(0, 12);
+  const lists = [...schPane.querySelectorAll('.sch-day:not(.past) .sch-list')];
+  let list = lists.find(l => { const r = l.closest('.sch-day').getBoundingClientRect(); return e.clientY >= r.top && e.clientY <= r.bottom; });
+  if (!list) return;
+  const sibs = [...list.querySelectorAll('.sch-item')].filter(x => x !== schDrag.el);
+  const next = sibs.find(x => { const r = x.getBoundingClientRect(); return e.clientY < r.top + r.height / 2; });
+  if (next) { if (schDrag.el.nextElementSibling !== next || schDrag.el.parentElement !== list) list.insertBefore(schDrag.el, next); }
+  else if (list.lastElementChild !== schDrag.el) list.appendChild(schDrag.el);
+});
+async function schEndDrag(){
+  if (!schDrag) return;
+  const el = schDrag.el; el.classList.remove('dragging');
+  const list = el.parentElement, d = list.dataset.day;
+  schDrag = null;
+  const changed = [];
+  [...list.querySelectorAll('.sch-item')].forEach((x, i) => {
+    const e = sched.find(s => s.id === x.dataset.sid); if (!e) return;
+    if (e.day !== d || e.pos !== i) changed.push({ ...e, day: d, pos: i, orig_day: e.day !== d ? null : e.orig_day });
+  });
+  if (!changed.length) return;
+  const backup = sched.map(e => ({ ...e }));
+  changed.forEach(r => Object.assign(sched.find(e => e.id === r.id), r));
+  renderSched();
+  const { error } = await sb.from('schedule').upsert(changed);
+  if (error) { sched = backup; renderSched(); toast('調位失敗：' + error.message, true); }
+}
+schPane.addEventListener('pointerup', schEndDrag);
+schPane.addEventListener('pointercancel', schEndDrag);
+$('#layer').addEventListener('input', e => { if (e.target.id === 'pkSearch' && pk) { pk.q = e.target.value; clearTimeout(pk.t); pk.t = setTimeout(() => { renderPicker(); const el = $('#pkSearch'); el.focus(); el.setSelectionRange(el.value.length, el.value.length); }, 250); } });
+$('#layer').addEventListener('change', e => { const id = e.target.dataset?.pk; if (id && pk) { e.target.checked ? pk.sel.add(id) : pk.sel.delete(id); const b = $('#layer [data-act="pkAdd"]'); if (b) { b.disabled = !pk.sel.size; b.textContent = `加入 ${pk.sel.size || ''} 項`; } } });
+
 /* ============ 撳一下直接修改單一欄位 ============ */
 function allShops(){
   return [...new Set([...SHOPS, ...items.filter(i => i.category === 'buy' && i.shop).map(i => i.shop.trim())])].filter(Boolean);
@@ -1522,21 +1815,23 @@ async function loadSettings(){
   let d = null;
   if (navigator.onLine) try {
     const { data, error } = await withTimeout(sb.from('settings').select('data').eq('user_id', user.id).maybeSingle(), 10000);
+    if (!error) settingsLoaded = true;
     if (!error && data?.data) { d = data.data; try { localStorage.setItem('settingsCache', JSON.stringify(d)); } catch {} }
   } catch {}
   if (!d) { try { d = JSON.parse(localStorage.getItem('settingsCache') || 'null'); } catch {} }
   if (d) applySettings(d);
 }
 function applySettings(d){
+  if (Array.isArray(d.days)) SCHED_DAYS = d.days;
   if (Array.isArray(d.cats) && d.cats.length) { CATS = d.cats; rebuildCats(); }
   if (Array.isArray(d.shops)) SHOPS = d.shops;
   renderShopList();
   if (d.priority) PRIORITY = { ...JSON.parse(JSON.stringify(DEFAULT_PRIORITY)), ...d.priority };
 }
 async function saveSettings(){
-  const { error } = await sb.from('settings').upsert({ user_id: user.id, data: { cats: CATS, priority: PRIORITY, shops: SHOPS }, updated_at: new Date().toISOString() });
+  const { error } = await sb.from('settings').upsert({ user_id: user.id, data: { cats: CATS, priority: PRIORITY, shops: SHOPS, days: SCHED_DAYS }, updated_at: new Date().toISOString() });
   if (error) { toast('設定儲存失敗：請先在 Supabase 執行 settings.sql', true); return false; }
-  try { localStorage.setItem('settingsCache', JSON.stringify({ cats: CATS, priority: PRIORITY, shops: SHOPS })); } catch {}
+  try { localStorage.setItem('settingsCache', JSON.stringify({ cats: CATS, priority: PRIORITY, shops: SHOPS, days: SCHED_DAYS })); } catch {}
   return true;
 }
 let mgr = null;
@@ -1708,6 +2003,16 @@ document.addEventListener('click', async e => {
     case 'edit': openEdit(id); break;
     case 'ef': openFieldEdit(id, a.dataset.f); break;
     case 'keep': toggleKeep(id); break;
+    case 'schToggle': if (schOnline()) toggleDone(id); break;
+    case 'schRemove': schRemove(a.closest('[data-sid]').dataset.sid); break;
+    case 'schMove': openSchMove(a.closest('[data-sid]').dataset.sid); break;
+    case 'schMoveTo': schMoveTo(a.dataset.sid, a.dataset.d); break;
+    case 'schPick': openPicker(a.dataset.d); break;
+    case 'schAddDay': addSchedDay(addDays(todayStr(), 1)); break;
+    case 'schDelDay': schDelDay(a.dataset.d); break;
+    case 'pkCat': pk.cat = a.dataset.cat; renderPicker(); break;
+    case 'pkAdd': pickerAdd([...pk.sel]); break;
+    case 'pkNew': pickerNew(); break;
     case 'pin': togglePin(id); break;
     case 'scope': ui.scope = a.dataset.s; localStorage.setItem('scope', ui.scope); closeSheet(); renderView(); break;
     case 'feSave': saveFieldEdit(); break;
@@ -1723,7 +2028,7 @@ document.addEventListener('click', async e => {
     case 'delete': deleteItem(id); break;
     case 'random': openRandom(); break;
     case 'randomDone': await toggleDone(id); toast('已標記完成'); openRandom(); break;
-    case 'close': closeSheet(); mgr = null; break;
+    case 'close': closeSheet(); mgr = null; pk = null; break;
     case 'manageCats': openManager(); break;
     case 'mgrTab': case 'mgrKind': case 'mgrColor': case 'mgrUp': case 'mgrDown':
     case 'mgrDel': case 'mgrAdd': case 'mgrPri': case 'mgrSave': case 'mgrKeep':
@@ -1741,6 +2046,7 @@ $('#layer').addEventListener('keydown', e => {
   if (e.target.id === 'mgrNewShop') { e.preventDefault(); mgrAction('mgrShopAdd', e.target); }
   else if (e.target.id === 'mgrNew') { e.preventDefault(); mgrAction('mgrAdd', e.target); }
   else if (e.target.dataset.fe != null && e.target.tagName === 'INPUT') { e.preventDefault(); saveFieldEdit(); }
+  else if (e.target.id === 'pkNew') { e.preventDefault(); pickerNew(); }
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { if (!lb.hidden) { lb.hidden = true; return; } closeSheet(); }
