@@ -167,7 +167,7 @@ a.i-title:hover{color:var(--accent)}
 a.i-url{text-decoration:none}
 a.i-url:hover{color:var(--accent);text-decoration:underline}
 .i-text.essay{font-family:var(--display);font-size:17px;line-height:1.75}
-.clamp{display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden}
+.clamp{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
 .expand{border:0;background:transparent;color:var(--accent);font-size:13px;padding:2px 0}
 .link-row{display:flex;gap:12px;align-items:flex-start}
 .link-main{flex:1;min-width:0}
@@ -228,8 +228,10 @@ a.i-url:hover{color:var(--accent);text-decoration:underline}
 .mini.on{background:var(--accent);border-color:var(--accent)}
 .tap{border:0;background:none;padding:0;font:inherit;color:inherit;cursor:pointer;display:inline-flex}
 .badge.add{background:transparent;border-style:dashed;color:var(--ink-2)}
-.tap-area{cursor:text;border-radius:6px}
-.tap-area:hover{background:var(--surface-2)}
+.tap-area{cursor:text;-webkit-user-select:text;user-select:text}
+.edit-btn{border:0;background:transparent;width:32px;height:32px;border-radius:8px;padding:0;color:var(--ink-2);font-size:16px}
+.edit-btn:hover{background:var(--surface-2)}
+.random-card .edit-btn{visibility:hidden}
 .pen{border:0;background:none;color:var(--ink-2);font-size:14px;padding:0 6px;vertical-align:baseline}
 .link-main .i-title{display:inline}
 input[type=range]{width:100%;accent-color:var(--accent)}
@@ -336,7 +338,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 /* ============ 設定 ============
    直接在這裏填入，就不用每部裝置各自輸入一次。
    anon key 是公開用的，資料靠 Supabase 的權限規則保護。 */
-const APP_VERSION = 'v1.9';
+const APP_VERSION = 'v1.9.1';
 const SUPABASE_URL = 'https://evbzbvvyqaxakbeslqgn.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_LKT5CR-u3eWAkRQ-wmp_0g_yEmwFmf6';
 
@@ -1196,6 +1198,7 @@ function renderView(){
   $('#viewList').innerHTML = vis.length ? vis.map(i => itemHTML(i)).join('')
     : `<div class="empty">${q ? '找不到符合的項目。' : '這裏還沒有項目。到「輸入」加第一個。'}</div>`;
   renderSideTodo();
+  fixClamps();
   fillImages();
 }
 // 輸入區下面：置頂（有才顯示）＋ To do
@@ -1220,9 +1223,22 @@ function dueBadge(due){
   if (d <= 3) return `<span class="badge soon">還有 ${d} 日</span>`;
   return `<span class="badge">${fmtDay(due)} 到期</span>`;
 }
+// 長內容先收起，顯示「展開」；短內容不顯示掣（由 fixClamps 判斷）
 function clampBlock(text, cls = ''){
-  const long = text.length > 180 || (text.match(/\n/g) || []).length > 5;
-  return `<div class="i-text ${cls} ${long ? 'clamp' : ''}">${linkify(text)}</div>${long ? '<button type="button" class="expand" data-act="expand">展開</button>' : ''}`;
+  return `<div class="i-text ${cls} clamp">${linkify(text)}</div><button type="button" class="expand" data-act="expand" hidden>展開</button>`;
+}
+function fixClamps(root = document){
+  root.querySelectorAll('.i-text.clamp').forEach(el => {
+    const btn = el.nextElementSibling;
+    if (!btn || !btn.classList.contains('expand')) return;
+    if (el.scrollHeight > el.clientHeight + 2) btn.hidden = false;
+    else { el.classList.remove('clamp'); btn.remove(); }
+  });
+}
+function toggleExpand(btn){
+  const box = btn.previousElementSibling; if (!box) return;
+  box.classList.toggle('clamp');
+  btn.textContent = box.classList.contains('clamp') ? '展開' : '收起';
 }
 function itemHTML(it, forceCat){
   const done = !!it.done_at;
@@ -1233,26 +1249,26 @@ function itemHTML(it, forceCat){
   let body = '';
 
   if (it.category === 'essay') {
-    if (it.title) body += `<div class="i-essay-title tap-area" data-act="ef" data-f="title">${esc(it.title)}</div>`;
+    if (it.title) body += `<div class="i-essay-title tap-area" data-act="tx">${esc(it.title)}</div>`;
   }
   if (it.kind === 'link') {
     const yid = siteType(it.content) === 'youtube' ? ytId(it.content) : null;
-    body += `<div class="link-row"><div class="link-main"><a class="i-title" href="${esc(it.content)}" target="_blank" rel="noopener">${esc(it.title || it.content)}</a><button type="button" class="pen" data-act="ef" data-f="title" aria-label="改標題">✎</button>
+    body += `<div class="link-row"><div class="link-main"><a class="i-title" href="${esc(it.content)}" target="_blank" rel="noopener">${esc(it.title || it.content)}</a>
       <a class="i-url" href="${esc(it.content)}" target="_blank" rel="noopener">${esc(it.content)}</a></div>
       ${yid ? `<a href="${esc(it.content)}" target="_blank" rel="noopener"><img class="yt-thumb" loading="lazy" src="https://i.ytimg.com/vi/${esc(yid)}/mqdefault.jpg" alt=""></a>` : ''}</div>`;
     badges.push(`<span class="badge">${esc(linkLabel(it.content))}</span>`);
   } else if (it.kind === 'text') {
-    if (it.category === 'works') body += `<div class="i-title tap-area" data-act="ef" data-f="content">${esc(it.content)}</div>`;
-    else body += `<div class="tap-area" data-act="ef" data-f="content">${clampBlock(it.content || '', it.category === 'essay' ? 'essay' : '')}</div>`;
+    if (it.category === 'works') body += `<div class="i-title tap-area" data-act="tx">${esc(it.content)}</div>`;
+    else body += `<div class="tap-area" data-act="tx">${clampBlock(it.content || '', it.category === 'essay' ? 'essay' : '')}</div>`;
   } else if (it.kind === 'image') {
-    if (it.title && it.category !== 'essay') body += `<div class="i-title tap-area" data-act="ef" data-f="title">${esc(it.title)}</div>`;
+    if (it.title && it.category !== 'essay') body += `<div class="i-title tap-area" data-act="tx">${esc(it.title)}</div>`;
     body += it._localURL ? `<img class="i-img" src="${it._localURL}" alt="${esc(it.title || '圖片')}">`
       : `<img class="i-img" data-path="${esc(it.file_path)}" alt="${esc(it.title || '圖片')}" loading="lazy">`;
-    if (it.content) body += `<div class="tap-area" data-act="ef" data-f="content">${clampBlock(it.content)}</div>`;
+    if (it.content) body += `<div class="tap-area" data-act="tx">${clampBlock(it.content)}</div>`;
   } else if (it.kind === 'file') {
-    body += `<div class="file-row"><span class="file-ico">📄</span><div style="flex:1;min-width:0"><div class="i-title tap-area" data-act="ef" data-f="title">${esc(it.title || it.file_name)}</div>
+    body += `<div class="file-row"><span class="file-ico">📄</span><div style="flex:1;min-width:0"><div class="i-title tap-area" data-act="tx">${esc(it.title || it.file_name)}</div>
       <div class="i-url">${fmtSize(it.file_size || 0)}</div></div>${it._pending ? '' : '<button type="button" class="ghost-btn sm" data-act="download">下載</button>'}</div>`;
-    if (it.content) body += `<div class="tap-area" data-act="ef" data-f="content">${clampBlock(it.content)}</div>`;
+    if (it.content) body += `<div class="tap-area" data-act="tx">${clampBlock(it.content)}</div>`;
   }
 
   const tap = (f, html) => `<button type="button" class="tap" data-act="ef" data-f="${f}">${html}</button>`;
@@ -1270,7 +1286,7 @@ function itemHTML(it, forceCat){
   if (it._pending) badges.push(`<span class="badge pend">⏳ 未同步</span>`);
   badges.push(it.category === 'essay' ? tap('entry_date', `<span>${fmtDay(it.entry_date || ymd(new Date(it.created_at)))}</span>`) : `<span>${fmtDate(it.created_at)}</span>`);
 
-  const note = it.note ? `<div class="i-note tap-area" data-act="ef" data-f="note">${linkify(it.note)}</div>` : '';
+  const note = it.note ? `<div class="i-note tap-area" data-act="tx">${linkify(it.note)}</div>` : '';
   let countdown = '';
   if (done) {
     const left = Math.ceil((new Date(it.done_at).getTime() + DONE_DAYS * 864e5 - Date.now()) / 864e5);
@@ -1280,6 +1296,7 @@ function itemHTML(it, forceCat){
     <button type="button" class="check ${done ? 'on' : ''}" data-act="toggle" aria-label="${done ? '取消完成' : '標記完成'}">${done ? CHECK_SVG : ''}</button>
     <div class="i-body">${body}${note}<div class="i-meta">${badges.join('')}</div>${countdown}</div>
     <div class="i-side"><button type="button" class="more-btn" data-act="menu" aria-label="更多">⋯</button>
+    <button type="button" class="edit-btn" data-act="edit" aria-label="編輯" title="編輯">✎</button>
     <button type="button" class="pin-btn ${isPinned(it) ? 'on' : ''}" data-act="pin" aria-label="${isPinned(it) ? '取消置頂' : '置頂'}" title="${isPinned(it) ? '取消置頂' : '置頂'}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h14M12 20V9M7 13l5-5 5 5"/></svg></button>
     <button type="button" class="keep-btn ${isKeep(it) ? 'on' : ''}" data-act="keep" aria-label="${isKeep(it) ? '取消收藏' : '設為收藏'}" title="${isKeep(it) ? '收藏（不計入數量）' : '待處理'}">📌</button></div></article>`;
 }
@@ -1408,7 +1425,7 @@ function openRandom(){
     <div class="sheet-foot">${it.kind === 'link' ? `<a class="ghost-btn" href="${esc(it.content)}" target="_blank" rel="noopener">打開</a>` : ''}
     <button type="button" class="ghost-btn" data-act="randomDone" data-id="${it.id}">標記完成</button>
     <button type="button" class="btn-primary inline" data-act="random">再抽一個</button></div>`);
-  fillImages();
+  fixClamps($('#layer')); fillImages();
 }
 function openSettings(){
   const th = getThreshold();
@@ -1668,7 +1685,7 @@ document.addEventListener('click', async e => {
   if (t.closest('a')) return;
   const a = t.closest('[data-act]'); if (!a) return;
   const id = a.dataset.id || a.closest('[data-id]')?.dataset.id;
-  if (id && pending.has(id) && !['expand', 'menu', 'delete', 'close'].includes(a.dataset.act)) { toast('這個項目未同步，上載後先可以修改'); return; }
+  if (id && pending.has(id) && !['expand', 'tx', 'menu', 'delete', 'close'].includes(a.dataset.act)) { toast('這個項目未同步，上載後先可以修改'); return; }
   if (a.dataset.act === 'flushNow') { flushQueue(true); return; }
   switch (a.dataset.act) {
     case 'more': ui.showMore = true; renderDraftExtra(); break;
@@ -1679,7 +1696,13 @@ document.addEventListener('click', async e => {
     case 'pickFileBanner': $('#pickFile').click(); break;
     case 'removeAttach': removeAttachment(); break;
     case 'toggle': toggleDone(id); break;
-    case 'expand': { const box = a.previousElementSibling; box.classList.toggle('clamp'); a.textContent = box.classList.contains('clamp') ? '展開' : '收起'; break; }
+    case 'expand': toggleExpand(a); break;
+    case 'tx': {
+      // 撳內容：有收起就展開／收起；選取文字時不做任何事，方便複製
+      if (String(window.getSelection?.() || '')) break;
+      const btn = a.querySelector('.expand:not([hidden])'); if (btn) toggleExpand(btn);
+      break;
+    }
     case 'download': downloadItem(id); break;
     case 'menu': openMenu(id); break;
     case 'edit': openEdit(id); break;
