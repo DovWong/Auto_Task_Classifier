@@ -145,6 +145,19 @@ textarea.input{resize:vertical}
 .view-sub{font-size:14px;color:var(--ink-2);margin:2px 0 6px}
 .view-filter{margin:8px 0 4px}
 
+.ctx-bar{display:flex;flex-wrap:wrap;gap:6px}
+.ctx-chip{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;border:1.5px dashed var(--line);background:transparent;color:var(--ink-2);font-size:14px}
+.ctx-chip.on{border-style:solid;border-color:var(--star);background:var(--surface);color:var(--ink)}
+.ctx-chip.add{padding:7px 11px}
+.ctx-chip small{font-size:11px;color:var(--ink-2)}
+.ctx-block{margin-top:14px}
+.ctx-head{font-size:19px}
+.ctx-fold{font-family:var(--display);font-weight:700;font-size:19px}
+.ctx-head .ghost-btn{margin-left:auto}
+.ctx-fields{margin-top:4px;padding:2px 0 6px;border-top:1px dashed var(--line)}
+.badge.wait{border-style:dashed}
+.badge.ctx-on{border-color:var(--star);color:var(--ink)}
+.icon-in{flex:0 0 48px!important;text-align:center;padding:8px 4px!important}
 .sch-add{margin:4px 0 8px}
 .seg-date{position:relative;padding:7px 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface);font-size:14px;cursor:pointer;overflow:hidden}
 .seg-date input{position:absolute;inset:0;opacity:0;width:100%;cursor:pointer}
@@ -342,6 +355,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
       </div>
       <div id="draftExtra"></div>
       <div id="sidePinned" class="side-todo"></div>
+      <div id="sideCtx" class="side-todo"></div>
       <div id="sideTodo" class="side-todo"></div>
     </section>
 
@@ -382,7 +396,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 /* ============ 設定 ============
    直接在這裏填入，就不用每部裝置各自輸入一次。
    anon key 是公開用的，資料靠 Supabase 的權限規則保護。 */
-const APP_VERSION = 'v2.0';
+const APP_VERSION = 'v2.1';
 const SUPABASE_URL = 'https://evbzbvvyqaxakbeslqgn.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_LKT5CR-u3eWAkRQ-wmp_0g_yEmwFmf6';
 
@@ -530,11 +544,32 @@ const ui = { tab:'input', viewCat: localStorage.getItem('lastCat') || 'all', sea
 // 收藏：項目自己設定優先，否則跟分類的預設
 const isPinned = i => !!i.pinned_at;
 const isKeep = i => i.keep != null ? !!i.keep : !!CAT[i.category]?.keep;
-const SCOPES = { all:'全部', todo:'待處理', keep:'收藏' };
+const SCOPES = { all:'全部', todo:'待處理', wait:'等待中', keep:'收藏' };
+/* ---- 情境：地點、開始日期、自訂情境 ---- */
+let CONTEXTS = [{ id:'idle', name:'沒事可做', icon:'☕', on:false }];
+let PLACE = { mode:'auto', days:[1,2,3,4,5], start:'09:00', end:'18:00' };
+const PLACES = { work:{ icon:'🏢', name:'工作' }, home:{ icon:'🏠', name:'在家' } };
+const ctxOf = id => CONTEXTS.find(c => c.id === id);
+function curPlace(){
+  if (PLACE.mode !== 'auto') return PLACE.mode;
+  const n = new Date(), hm = pad(n.getHours()) + ':' + pad(n.getMinutes());
+  return PLACE.days.includes(n.getDay()) && hm >= PLACE.start && hm < PLACE.end ? 'work' : 'home';
+}
+const notStarted = i => !!i.start_date && i.start_date > todayStr();
+const ctxOff = i => !!i.ctx && !!ctxOf(i.ctx) && !ctxOf(i.ctx).on;
+const isWaiting = i => notStarted(i) || ctxOff(i);
+const placeRank = i => !i.place ? 1 : i.place === curPlace() ? 0 : 2;
+function inScope(i, sc = ui.scope){
+  if (sc === 'all') return true;
+  if (sc === 'wait') return isWaiting(i);
+  if (sc === 'keep') return isKeep(i) && !isWaiting(i);
+  return !isKeep(i) && !isWaiting(i);
+}
 let draft = newDraft();
 function newDraft(){
   return { kind:null, text:'', url:'', file:null, previewURL:'', cat:null, title:'', titleTouched:false, titleState:'idle',
-           note:'', noteTouched:false, showNote:false, due:'', workType:'', entryDate:todayStr(), price:'', shop:'' };
+           note:'', noteTouched:false, showNote:false, due:'', workType:'', entryDate:todayStr(), price:'', shop:'',
+           showCtx:false, place:'', startDate:'', ctx:'' };
 }
 
 /* ============ boot / auth ============ */
@@ -912,6 +947,8 @@ function fieldsHTML(){
       <div class="field"><label>在哪裏買</label><input class="input" data-f="shop" value="${esc(draft.shop)}"></div></div>
       <div class="seg" style="margin-top:8px">${allShops().map(x => `<button type="button" data-shop="${esc(x)}" class="${draft.shop === x ? 'on' : ''}">${esc(x)}</button>`).join('')}</div>`;
   }
+  if (draft.showCtx || draft.place || draft.startDate || draft.ctx) h += ctxFieldsHTML(draft.place, draft.startDate, draft.ctx, 'd');
+  else h += `<button type="button" class="add-note" data-act="showCtx">＋ 情境／開始日期</button> `;
   h += (draft.showNote || draft.note)
     ? `<div class="field"><label>備註</label><textarea class="input" data-f="note" rows="2">${esc(draft.note)}</textarea></div>`
     : `<button type="button" class="add-note" data-act="note">＋ 備註</button>`;
@@ -1005,6 +1042,10 @@ async function save(){
     if (c === 'works') row.work_type = nz(draft.workType);
     if (c === 'essay') row.entry_date = draft.entryDate || todayStr();
     if (c === 'buy') { row.price = nz(draft.price.trim()); row.shop = nz(draft.shop.trim()); }
+    // 只在有設定時先送出，未執行 ctx.sql 都唔會影響一般儲存
+    if (draft.place) row.place = draft.place;
+    if (draft.startDate) row.start_date = draft.startDate;
+    if (draft.ctx) row.ctx = draft.ctx;
 
     if (draft.file && draft.file.remote) {
       // 捷徑分享的檔案已經在伺服器上，必須連線
@@ -1196,8 +1237,7 @@ function visibleItems(){
   else if (ui.viewCat !== 'all') list = list.filter(i => i.category === ui.viewCat);
   if (!q && ui.viewCat === 'works' && ui.workFilter !== 'all') list = list.filter(i => i.work_type === ui.workFilter);
   if (!q && ui.viewCat === 'buy' && ui.shopFilter !== 'all') list = list.filter(i => ui.shopFilter === '__none' ? !i.shop : i.shop === ui.shopFilter);
-  if (!q && ui.scope === 'todo') list = list.filter(i => !isKeep(i));
-  if (!q && ui.scope === 'keep') list = list.filter(i => isKeep(i));
+  if (!q && ui.scope !== 'all') list = list.filter(i => inScope(i));
   return sortItems(list, !q && ui.viewCat === 'todo');
 }
 function sortItems(list, byDue){
@@ -1205,7 +1245,9 @@ function sortItems(list, byDue){
   active.sort((a, b) => {
     if (isPinned(a) !== isPinned(b)) return isPinned(a) ? -1 : 1;
     if (isPinned(a) && isPinned(b)) return b.pinned_at.localeCompare(a.pinned_at);
+    if (isWaiting(a) !== isWaiting(b)) return isWaiting(a) ? 1 : -1;
     if (isKeep(a) !== isKeep(b)) return isKeep(a) ? 1 : -1;
+    if (placeRank(a) !== placeRank(b)) return placeRank(a) - placeRank(b);
     if (byDue) {
       if (a.due_date && b.due_date && a.due_date !== b.due_date) return a.due_date < b.due_date ? -1 : 1;
       if (a.due_date && !b.due_date) return -1;
@@ -1219,7 +1261,6 @@ function sortItems(list, byDue){
 function renderCatBar(){
   const counts = {}; let all = 0;
   // 數字跟住「全部／待處理／收藏」的選擇
-  const inScope = i => ui.scope === 'all' || (ui.scope === 'keep') === isKeep(i);
   for (const i of items) if (!i.done_at && inScope(i)) { counts[i.category] = (counts[i.category] || 0) + 1; all++; }
   const q = ui.search.trim();
   const chip = (id, name, c, n, extra = '') => `<button type="button" class="cat-chip ${!q && ui.viewCat === id ? 'selected' : ''}" style="--c:${c}" data-view="${id}">${esc(name)}${extra}<span class="count">${n || ''}</span></button>`;
@@ -1233,7 +1274,9 @@ function renderView(){
   const catId = q ? null : ui.viewCat;
   const vis = visibleItems();
   const activeN = vis.filter(i => !i.done_at).length;
-  const todoN = vis.filter(i => !i.done_at && !isKeep(i)).length, keepN = activeN - todoN;
+  const act = vis.filter(i => !i.done_at);
+  const todoN = act.filter(i => inScope(i, 'todo')).length, waitN = act.filter(isWaiting).length, keepN = act.filter(i => inScope(i, 'keep')).length;
+  const countTxt = [todoN && `${todoN} 待處理`, waitN && `${waitN} 等待中`, keepN && `${keepN} 收藏`].filter(Boolean);
   const title = (q ? `搜尋「${esc(q)}」` : catId === 'all' ? '全部' : esc(CAT[catId]?.name || '')) + (!q && ui.scope !== 'all' && catId !== 'all' ? `・${SCOPES[ui.scope]}` : !q && ui.scope !== 'all' ? `・${SCOPES[ui.scope]}` : '');
   const color = catId && catId !== 'all' ? CAT[catId].c : 'var(--ink-2)';
   let extra = '';
@@ -1249,8 +1292,8 @@ function renderView(){
     const sum = vis.filter(i => !i.done_at).map(i => parseFloat(String(i.price || '').replace(/[^\d.]/g, ''))).filter(n => !isNaN(n)).reduce((a, b) => a + b, 0);
     if (sum) extra += `<div class="view-sub">未買合共約 $${sum.toLocaleString()}</div>`;
   }
-  $('#viewHead').innerHTML = `<div class="view-headrow"><h2 class="view-title" style="--c:${color}">${title}<span class="view-count">${keepN && todoN ? `${todoN} 待處理 · ${keepN} 收藏` : keepN ? `收藏 ${keepN}` : todoN}</span></h2>
-    ${activeN && !q ? '<button type="button" class="ghost-btn" data-act="random">🎲 抽一個</button>' : ''}</div>${extra}`;
+  $('#viewHead').innerHTML = `<div class="view-headrow"><h2 class="view-title" style="--c:${color}">${title}<span class="view-count">${countTxt.length > 1 && ui.scope === 'all' ? countTxt.join(' · ') : act.length}</span></h2>
+    </div>${extra}`;
   $('#viewList').innerHTML = vis.length ? vis.map(i => itemHTML(i)).join('')
     : `<div class="empty">${q ? '找不到符合的項目。' : '這裏還沒有項目。到「輸入」加第一個。'}</div>`;
   renderSideTodo();
@@ -1266,9 +1309,10 @@ function renderSideTodo(){
     pbox.innerHTML = pins.length ? `<div class="side-head" style="--c:var(--accent)"><span>置頂</span><span class="view-count">${pins.length}</span></div>` +
       pins.map(i => itemHTML(i, true)).join('') : '';
   }
+  renderCtxPanel();
   const box = $('#sideTodo'); if (!box) return;
   if (!CAT.todo) { box.innerHTML = ''; return; }
-  const list = sortItems(items.filter(i => i.category === 'todo' && !i.done_at && !isKeep(i) && !isPinned(i)), true);
+  const list = sortItems(items.filter(i => i.category === 'todo' && !i.done_at && !isKeep(i) && !isPinned(i) && !isWaiting(i) && !i.ctx), true);
   box.innerHTML = `<div class="side-head" style="--c:${CAT.todo.c}"><span>${esc(CAT.todo.name)}</span><span class="view-count">${list.length}</span></div>` +
     (list.length ? list.map(i => itemHTML(i)).join('') : '<div class="hint" style="padding:12px 2px">沒有待辦事項 🎉</div>');
 }
@@ -1340,6 +1384,13 @@ function itemHTML(it, forceCat){
   if (it.category === 'buy') {
     badges.push(it.shop ? tap('shop', `<span class="badge">🛒 ${esc(it.shop)}</span>`) : add('shop', '在哪裏買'));
     badges.push(it.price ? tap('price', `<span class="badge">$${esc(String(it.price).replace(/^\$/, ''))}</span>`) : add('price', '價錢'));
+  }
+  const ctxTap = html => `<button type="button" class="tap" data-act="ctxEdit">${html}</button>`;
+  if (!done) {
+    if (it.place && PLACES[it.place]) badges.push(ctxTap(`<span class="badge ${it.place === curPlace() ? 'ctx-on' : ''}">${PLACES[it.place].icon} ${PLACES[it.place].name}</span>`));
+    if (notStarted(it)) badges.push(ctxTap(`<span class="badge wait">📅 ${fmtDay(it.start_date)}開始</span>`));
+    const cx = it.ctx && ctxOf(it.ctx);
+    if (cx) badges.push(ctxTap(`<span class="badge ${cx.on ? 'ctx-on' : 'wait'}">${esc(cx.icon || '')} ${esc(cx.name)}</span>`));
   }
   if (it._pending) badges.push(`<span class="badge pend">⏳ 未同步</span>`);
   badges.push(it.category === 'essay' ? tap('entry_date', `<span>${fmtDay(it.entry_date || ymd(new Date(it.created_at)))}</span>`) : `<span>${fmtDate(it.created_at)}</span>`);
@@ -1432,6 +1483,7 @@ function openMenu(id){
   openSheet(`<div class="sheet-title">${esc(summaryOf(it))}</div><div class="menu">
     <button type="button" data-act="edit" data-id="${id}">編輯</button>
     <button type="button" data-act="moveMenu" data-id="${id}">轉分類</button>
+    <button type="button" data-act="ctxEditMenu" data-id="${id}">情境／開始日期</button>
     <button type="button" data-act="copy" data-id="${id}">複製內容</button>
     <button type="button" data-act="delete" data-id="${id}" class="danger">刪除</button></div>
     <button type="button" class="ghost-btn full" data-act="close">取消</button>`);
@@ -1473,8 +1525,9 @@ async function saveEdit(){
   const ok = await updateItem(s.id, patch);
   if (ok) { closeSheet(); toast('已更新'); }
 }
+let randomCtx = null;
 function openRandom(){
-  const pool = visibleItems().filter(i => !i.done_at);
+  const pool = randomCtx ? items.filter(i => !i.done_at && i.ctx === randomCtx && !notStarted(i)) : visibleItems().filter(i => !i.done_at);
   if (!pool.length) { closeSheet(); toast('這裏沒有未完成的項目了'); return; }
   const cand = pool.length > 1 ? pool.filter(i => i.id !== lastRandom) : pool;
   const it = cand[Math.floor(Math.random() * cand.length)];
@@ -1491,6 +1544,7 @@ function openSettings(){
     <div class="field"><label>相似提示門檻：<b id="thVal">${th}%</b></label><input type="range" min="30" max="90" step="5" value="${th}" data-range="threshold"></div>
     <p class="hint">數值越低，越容易出現「可能相似」的提示。</p>
     <div class="menu"><button type="button" data-act="manageCats">管理分類及優先次序</button>
+    <button type="button" data-act="ctxManage">情境及工作時間</button>
     <button type="button" data-act="reload">重新載入資料</button>
     ${!SUPABASE_URL ? '<button type="button" data-act="resetConfig">更改 Supabase 連線</button>' : ''}
     <button type="button" data-act="logout" class="danger">登出</button></div>
@@ -1519,11 +1573,142 @@ async function toggleKeep(id){
   } else toast(val ? '已設為收藏，不計入數量' : '已設為待處理');
 }
 function openScope(){
-  const n = s => items.filter(i => !i.done_at && (s === 'all' || (s === 'keep') === isKeep(i))).length;
+  const n = s => items.filter(i => !i.done_at && inScope(i, s)).length;
   openSheet(`<h3>顯示哪些項目？</h3><div class="scope-menu">${Object.entries(SCOPES).map(([k, l]) =>
     `<button type="button" data-act="scope" data-s="${k}" class="${ui.scope === k ? 'on' : ''}"><span>${l}</span><span>${n(k)}</span></button>`).join('')}</div>
-    <p class="hint">這個選擇亦會套用到每個分類。項目右邊的 📌 亮起就是收藏，不計入數量。</p>
+    <p class="hint">這個選擇亦會套用到每個分類。「等待中」是未到開始日期、或者情境未開的項目，不計入待處理。項目右邊的 📌 亮起就是收藏。</p>
     <button type="button" class="ghost-btn full" data-act="close">關閉</button>`);
+}
+
+/* ============ 情境 ============ */
+function ctxFieldsHTML(place, start, ctx, pfx){
+  const t = todayStr();
+  const startQuick = [['明日', addDays(t, 1)], ['下星期', addDays(t, 7)], ['下個月', addDays(t, 30)], ['不設', '']]
+    .map(([l, v]) => `<button type="button" data-${pfx}sd="${v}" class="${(start || '') === v ? 'on' : ''}">${l}</button>`).join('');
+  return `<div class="ctx-fields">
+    <div class="field"><label>地點（只影響排序）</label><div class="seg">${Object.entries(PLACES).map(([k, v]) =>
+      `<button type="button" data-${pfx}pl="${k}" class="${place === k ? 'on' : ''}">${v.icon} ${v.name}</button>`).join('')}</div></div>
+    <div class="field"><label>開始日期（之前會放入「等待中」）</label><input type="date" class="input" ${pfx === 'd' ? 'data-f="startDate"' : 'id="ceStart"'} value="${esc(start || '')}" min="${t}">
+      <div class="seg">${startQuick}</div></div>
+    <div class="field"><label>情境（未開時放入「等待中」）</label><div class="seg">${CONTEXTS.map(c =>
+      `<button type="button" data-${pfx}ctx="${c.id}" class="${ctx === c.id ? 'on' : ''}">${esc(c.icon || '')} ${esc(c.name)}</button>`).join('')}</div>
+      ${pfx === 'e' ? '<div class="mgr-row"><input class="input" id="ceNewCtx" placeholder="新情境，例如 去內地旅行"><button type="button" class="ghost-btn" data-act="ceNewCtx">新增</button></div>' : ''}</div>
+  </div>`;
+}
+let ctxFolded = (() => { try { return JSON.parse(localStorage.getItem('ctxFolded') || '{}'); } catch { return {}; } })();
+function ctxFold(id){ ctxFolded[id] = !ctxFolded[id]; try { localStorage.setItem('ctxFolded', JSON.stringify(ctxFolded)); } catch {} renderCtxPanel(); }
+let lastPlace = null;
+function renderCtxPanel(){
+  const box = $('#sideCtx'); if (!box) return;
+  const pl = curPlace(); lastPlace = pl;
+  const cnt = id => items.filter(i => !i.done_at && i.ctx === id && !notStarted(i)).length;
+  let h = `<div class="ctx-bar">
+    <button type="button" class="ctx-chip on" data-act="ctxPlace" title="撳一下切換：自動 → 工作 → 在家">${PLACES[pl].icon} ${PLACES[pl].name}${PLACE.mode === 'auto' ? '<small>自動</small>' : ''}</button>
+    ${CONTEXTS.map(c => `<button type="button" class="ctx-chip ${c.on ? 'on' : ''}" data-act="ctxToggle" data-ctx="${c.id}">${esc(c.icon || '')} ${esc(c.name)}${cnt(c.id) ? `<small>${cnt(c.id)}</small>` : ''}</button>`).join('')}
+    <button type="button" class="ctx-chip add" data-act="ctxManage" aria-label="管理情境">＋</button></div>`;
+  for (const c of CONTEXTS.filter(c => c.on)) {
+    const list = sortItems(items.filter(i => !i.done_at && i.ctx === c.id && !notStarted(i) && !isPinned(i)));
+    const folded = !!ctxFolded[c.id];
+    h += `<div class="ctx-block"><div class="side-head ctx-head" style="--c:var(--star)">
+      <button type="button" class="tap ctx-fold" data-act="ctxFold" data-ctx="${c.id}">${folded ? '▸' : '▾'} ${esc(c.icon || '')} ${esc(c.name)}</button>
+      <span class="view-count">${list.length}</span>
+      ${list.length ? `<button type="button" class="ghost-btn sm" data-act="ctxRandom" data-ctx="${c.id}">🎲 抽一個</button>` : ''}</div>
+      ${folded ? '' : list.length ? list.map(i => itemHTML(i, true)).join('') : '<div class="hint" style="padding:8px 2px">這個情境未有項目。可以喺項目的「⋯ → 情境／開始日期」加入。</div>'}</div>`;
+  }
+  box.innerHTML = h;
+}
+let ctxSaveTimer = null;
+function saveCtxSoon(){ clearTimeout(ctxSaveTimer); ctxSaveTimer = setTimeout(saveSettings, 600); }
+function toggleCtx(id){
+  const c = ctxOf(id); if (!c) return;
+  c.on = !c.on; renderView(); saveCtxSoon();
+  toast(`${c.icon || ''} ${c.name}：${c.on ? '已開，相關項目已出現' : '已關，相關項目放回等待中'}`);
+}
+function cyclePlace(){
+  PLACE.mode = PLACE.mode === 'auto' ? 'work' : PLACE.mode === 'work' ? 'home' : 'auto';
+  renderView(); saveCtxSoon();
+  toast(PLACE.mode === 'auto' ? `按工作時間自動切換（而家：${PLACES[curPlace()].name}）` : `手動設為：${PLACES[PLACE.mode].name}`);
+}
+setInterval(() => { if (PLACE.mode === 'auto' && lastPlace && curPlace() !== lastPlace) renderView(); }, 60000);
+
+// 單一項目的情境設定
+let ceState = null;
+function openCtxEdit(id){
+  const it = findItem(id); if (!it) return;
+  ceState = { id, place: it.place || '', start: it.start_date || '', ctx: it.ctx || '' };
+  renderCtxEdit();
+}
+function renderCtxEdit(){
+  const it = findItem(ceState.id);
+  openSheet(`<h3>情境／開始日期</h3><div class="sheet-title">${esc(summaryOf(it || {}))}</div>
+    ${ctxFieldsHTML(ceState.place, ceState.start, ceState.ctx, 'e')}
+    <div class="sheet-foot"><button type="button" class="ghost-btn" data-act="close">取消</button><button type="button" class="btn-primary inline" data-act="ceSave">儲存</button></div>`);
+}
+$('#layer').addEventListener('input', e => { if (e.target.id === 'ceStart' && ceState) ceState.start = e.target.value; });
+async function saveCtxEdit(){
+  if (!ceState) return;
+  const st = ceState;
+  const ok = await updateItem(st.id, { place: nz(st.place), start_date: nz(st.start), ctx: nz(st.ctx) });
+  if (ok) { ceState = null; closeSheet(); toast('已更新'); }
+}
+async function ceNewCtx(){
+  const name = ($('#ceNewCtx')?.value || '').trim(); if (!name) { toast('請輸入情境名稱', true); return; }
+  let c = CONTEXTS.find(x => x.name === name);
+  if (!c) { c = { id: 'x' + Date.now().toString(36), name, icon: '🏷️', on: false }; CONTEXTS.push(c); await saveSettings(); }
+  ceState.ctx = c.id; renderCtxEdit();
+}
+
+// 管理情境及工作時間
+let ctxMgr = null;
+function openCtxManager(){ ctxMgr = { ctxs: CONTEXTS.map(c => ({ ...c })), place: JSON.parse(JSON.stringify(PLACE)), removed: [] }; renderCtxManager(); }
+function renderCtxManager(){
+  const m = ctxMgr, used = id => items.filter(i => i.ctx === id && !i.done_at).length;
+  openSheet(`<h3>情境</h3>
+    ${m.ctxs.map((c, i) => `<div class="mgr-row"><input class="input icon-in" data-cm-icon="${i}" value="${esc(c.icon || '')}" maxlength="4">
+      <input class="input" data-cm-name="${i}" value="${esc(c.name)}">
+      <button type="button" class="mini" data-act="cmDel" data-i="${i}" aria-label="刪除">✕</button></div>
+      <div class="mgr-sub" style="margin-left:56px">${used(c.id)} 個項目${c.on ? '・而家開咗' : ''}</div>`).join('')}
+    <div class="mgr-row" style="margin-top:14px"><input class="input icon-in" id="cmNewIcon" placeholder="🏷️" maxlength="4"><input class="input" id="cmNew" placeholder="新情境，例如 北海道確認後"><button type="button" class="ghost-btn" data-act="cmAdd">新增</button></div>
+    <p class="hint">刪除情境後，相關項目會變返普通項目，唔會刪除。一次性的情境（例如等朋友確認），條件達成後可以一直開住，做完再刪除。</p>
+    <h3 style="margin-top:20px">工作時間</h3>
+    <div class="seg">${[['auto', '自動'], ['work', '固定：工作'], ['home', '固定：在家']].map(([k, l]) => `<button type="button" data-act="cmMode" data-m="${k}" class="${m.place.mode === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+    <div class="field"><label>工作日</label><div class="seg">${[1, 2, 3, 4, 5, 6, 0].map(d => `<button type="button" data-act="cmDay" data-d="${d}" class="${m.place.days.includes(d) ? 'on' : ''}">${WD[d]}</button>`).join('')}</div></div>
+    <div class="field-row"><div class="field"><label>開始</label><input type="time" class="input" id="cmStart" value="${m.place.start}"></div>
+      <div class="field"><label>結束</label><input type="time" class="input" id="cmEnd" value="${m.place.end}"></div></div>
+    <p class="hint">「自動」會喺工作日的工作時間內當作「工作」，其餘時間當作「在家」。首頁的地點掣亦可以隨時手動切換。</p>
+    <div class="sheet-foot"><button type="button" class="ghost-btn" data-act="close">取消</button><button type="button" class="btn-primary inline" data-act="cmSave">儲存</button></div>`);
+}
+$('#layer').addEventListener('input', e => {
+  if (!ctxMgr) return;
+  const d = e.target.dataset;
+  if (d.cmName != null) ctxMgr.ctxs[+d.cmName].name = e.target.value;
+  if (d.cmIcon != null) ctxMgr.ctxs[+d.cmIcon].icon = e.target.value;
+  if (e.target.id === 'cmStart') ctxMgr.place.start = e.target.value;
+  if (e.target.id === 'cmEnd') ctxMgr.place.end = e.target.value;
+});
+function cmAdd(){
+  const name = ($('#cmNew')?.value || '').trim(); if (!name) { toast('請輸入情境名稱', true); return; }
+  if (ctxMgr.ctxs.some(c => c.name === name)) { toast('已經有同名情境', true); return; }
+  ctxMgr.ctxs.push({ id: 'x' + Date.now().toString(36), name, icon: ($('#cmNewIcon')?.value || '').trim() || '🏷️', on: false });
+  renderCtxManager();
+}
+function cmDel(i){
+  const c = ctxMgr.ctxs[i]; if (!c) return;
+  if (!confirm(`刪除情境「${c.name}」？相關項目會變返普通項目。`)) return;
+  ctxMgr.removed.push(c.id); ctxMgr.ctxs.splice(i, 1); renderCtxManager();
+}
+async function saveCtxManager(){
+  const m = ctxMgr; if (!m) return;
+  if (m.ctxs.some(c => !c.name.trim())) { toast('情境名稱不可以留空', true); return; }
+  if (!m.place.days.length || m.place.start >= m.place.end) { toast('請檢查工作日及時間', true); return; }
+  if (m.removed.length) {
+    const { error } = await sb.from('items').update({ ctx: null }).in('ctx', m.removed);
+    if (error && !/ctx/.test(error.message)) { toast('更新項目失敗：' + error.message, true); return; }
+    items.forEach(i => { if (m.removed.includes(i.ctx)) i.ctx = null; });
+  }
+  CONTEXTS = m.ctxs.map(c => ({ ...c, name: c.name.trim() })); PLACE = m.place;
+  if (!(await saveSettings())) return;
+  ctxMgr = null; closeSheet(); renderView(); renderDraftExtra(); toast('已更新情境');
 }
 
 /* ============ 時間表 ============ */
@@ -1821,7 +2006,10 @@ async function loadSettings(){
   if (!d) { try { d = JSON.parse(localStorage.getItem('settingsCache') || 'null'); } catch {} }
   if (d) applySettings(d);
 }
+function settingsData(){ return { cats: CATS, priority: PRIORITY, shops: SHOPS, days: SCHED_DAYS, contexts: CONTEXTS, place: PLACE }; }
 function applySettings(d){
+  if (Array.isArray(d.contexts) && d.contexts.length) CONTEXTS = d.contexts;
+  if (d.place) PLACE = { ...PLACE, ...d.place };
   if (Array.isArray(d.days)) SCHED_DAYS = d.days;
   if (Array.isArray(d.cats) && d.cats.length) { CATS = d.cats; rebuildCats(); }
   if (Array.isArray(d.shops)) SHOPS = d.shops;
@@ -1829,9 +2017,9 @@ function applySettings(d){
   if (d.priority) PRIORITY = { ...JSON.parse(JSON.stringify(DEFAULT_PRIORITY)), ...d.priority };
 }
 async function saveSettings(){
-  const { error } = await sb.from('settings').upsert({ user_id: user.id, data: { cats: CATS, priority: PRIORITY, shops: SHOPS, days: SCHED_DAYS }, updated_at: new Date().toISOString() });
+  const { error } = await sb.from('settings').upsert({ user_id: user.id, data: settingsData(), updated_at: new Date().toISOString() });
   if (error) { toast('設定儲存失敗：請先在 Supabase 執行 settings.sql', true); return false; }
-  try { localStorage.setItem('settingsCache', JSON.stringify({ cats: CATS, priority: PRIORITY, shops: SHOPS, days: SCHED_DAYS })); } catch {}
+  try { localStorage.setItem('settingsCache', JSON.stringify(settingsData())); } catch {}
   return true;
 }
 let mgr = null;
@@ -1972,6 +2160,12 @@ document.addEventListener('click', async e => {
   if (vw && vw.dataset.view === 'all' && ui.viewCat === 'all' && !ui.search.trim()) { openScope(); return; }
   if (vw) { ui.viewCat = vw.dataset.view; localStorage.setItem('lastCat', ui.viewCat); ui.search = ''; $('#searchInput').value = ''; ui.workFilter = 'all'; ui.shopFilter = 'all'; renderView(); return; }
   const sf = t.closest('[data-sf]'); if (sf) { ui.shopFilter = sf.dataset.sf; renderView(); return; }
+  const dpl = t.closest('[data-dpl]'); if (dpl) { draft.place = draft.place === dpl.dataset.dpl ? '' : dpl.dataset.dpl; renderDraftExtra(); return; }
+  const dcx = t.closest('[data-dctx]'); if (dcx) { draft.ctx = draft.ctx === dcx.dataset.dctx ? '' : dcx.dataset.dctx; renderDraftExtra(); return; }
+  const dsd = t.closest('[data-dsd]'); if (dsd) { draft.startDate = dsd.dataset.dsd; renderDraftExtra(); return; }
+  const epl = t.closest('[data-epl]'); if (epl && ceState) { ceState.place = ceState.place === epl.dataset.epl ? '' : epl.dataset.epl; renderCtxEdit(); return; }
+  const ecx = t.closest('[data-ectx]'); if (ecx && ceState) { ceState.ctx = ceState.ctx === ecx.dataset.ectx ? '' : ecx.dataset.ectx; renderCtxEdit(); return; }
+  const esd = t.closest('[data-esd]'); if (esd && ceState) { ceState.start = esd.dataset.esd; renderCtxEdit(); return; }
   const sh = t.closest('[data-shop]'); if (sh) { draft.shop = draft.shop === sh.dataset.shop ? '' : sh.dataset.shop; renderDraftExtra(); return; }
   const wf = t.closest('[data-wf]'); if (wf) { ui.workFilter = wf.dataset.wf; renderView(); return; }
   const img = t.closest('img[data-path]');
@@ -1984,6 +2178,7 @@ document.addEventListener('click', async e => {
   if (a.dataset.act === 'flushNow') { flushQueue(true); return; }
   switch (a.dataset.act) {
     case 'more': ui.showMore = true; renderDraftExtra(); break;
+    case 'showCtx': draft.showCtx = true; renderDraftExtra(); break;
     case 'note': draft.showNote = true; renderDraftExtra(); $('#draftExtra [data-f="note"]')?.focus(); break;
     case 'save': save(); break;
     case 'clear': discardRemote(); resetDraft(); break;
@@ -2013,6 +2208,7 @@ document.addEventListener('click', async e => {
     case 'pkCat': pk.cat = a.dataset.cat; renderPicker(); break;
     case 'pkAdd': pickerAdd([...pk.sel]); break;
     case 'pkNew': pickerNew(); break;
+    case 'ceNewCtx': ceNewCtx(); break;
     case 'pin': togglePin(id); break;
     case 'scope': ui.scope = a.dataset.s; localStorage.setItem('scope', ui.scope); closeSheet(); renderView(); break;
     case 'feSave': saveFieldEdit(); break;
@@ -2027,8 +2223,20 @@ document.addEventListener('click', async e => {
     }
     case 'delete': deleteItem(id); break;
     case 'random': openRandom(); break;
+    case 'ctxRandom': randomCtx = a.dataset.ctx; openRandom(); break;
+    case 'ctxToggle': toggleCtx(a.dataset.ctx); break;
+    case 'ctxPlace': cyclePlace(); break;
+    case 'ctxFold': ctxFold(a.dataset.ctx); break;
+    case 'ctxManage': openCtxManager(); break;
+    case 'ctxEdit': case 'ctxEditMenu': openCtxEdit(id); break;
+    case 'ceSave': saveCtxEdit(); break;
+    case 'cmSave': saveCtxManager(); break;
+    case 'cmAdd': cmAdd(); break;
+    case 'cmDel': cmDel(+a.dataset.i); break;
+    case 'cmMode': ctxMgr.place.mode = a.dataset.m; renderCtxManager(); break;
+    case 'cmDay': { const d = +a.dataset.d, ds = ctxMgr.place.days; ds.includes(d) ? ds.splice(ds.indexOf(d), 1) : ds.push(d); renderCtxManager(); break; }
     case 'randomDone': await toggleDone(id); toast('已標記完成'); openRandom(); break;
-    case 'close': closeSheet(); mgr = null; pk = null; break;
+    case 'close': closeSheet(); mgr = null; pk = null; randomCtx = null; ceState = null; ctxMgr = null; break;
     case 'manageCats': openManager(); break;
     case 'mgrTab': case 'mgrKind': case 'mgrColor': case 'mgrUp': case 'mgrDown':
     case 'mgrDel': case 'mgrAdd': case 'mgrPri': case 'mgrSave': case 'mgrKeep':
